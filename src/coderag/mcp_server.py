@@ -102,6 +102,13 @@ def coderag_context(
                 for e in package.entries
             ],
             "token_accounting": a.as_dict(),
+            "measurement": (
+                f"Returned {a.context_tokens} tokens of context instead of the "
+                f"{a.baseline_tokens} tokens it would take to read the "
+                f"{a.baseline_files} file(s) containing this code "
+                f"({a.reduction_vs_files}% fewer input tokens)."
+                if a.baseline_tokens else "No baseline recorded."
+            ),
         }
 
 

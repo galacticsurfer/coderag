@@ -18,7 +18,7 @@ CodeRAG FastAPI  ──►  retrieval / context / ask  ──►  PostgreSQL + (
 ```
 
 The extension is a **client**. All intelligence stays server-side, which keeps the extension
-tiny and lets it benefit from every improvement to retrieval/ranking without a redeploy.
+tiny and lets it inherit every improvement to retrieval/ranking without a redeploy.
 
 ## Prerequisites
 

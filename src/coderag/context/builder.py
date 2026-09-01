@@ -9,7 +9,7 @@ rather than truncating everything. The budget is enforced BEFORE the LLM call.
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from coderag.context.package import (
@@ -20,7 +20,7 @@ from coderag.context.package import (
 )
 from coderag.core.config import Settings, get_settings
 from coderag.core.tokens import TokenCounter, get_token_counter
-from coderag.db.models import Repository, Symbol
+from coderag.db.models import Repository, SourceFile, Symbol
 from coderag.retrieval.base import EXACT_SYMBOL, SEMANTIC, Candidate
 
 _DEP_REASONS = {"graph_callee", "graph_import", "graph_base"}
@@ -112,9 +112,13 @@ class ContextBuilder:
                 )
             )
 
+        baseline_tokens, baseline_files = self._file_baseline(repository.id, entries)
+
         pkg = ContextPackage(query=query, entries=entries, dropped=dropped)
         pkg.prompt_text = self._render(repository.name, query, pkg, finding)
         pkg.accounting = TokenAccounting(
+            baseline_tokens=baseline_tokens,
+            baseline_files=baseline_files,
             query_tokens=self.tokens.count(query),
             candidates_found=len(candidates),
             candidates_selected=len(entries),
@@ -124,6 +128,26 @@ class ContextBuilder:
             final_prompt_tokens=self.tokens.count(pkg.prompt_text),
         )
         return pkg
+
+    def _file_baseline(
+        self, repository_id: int, entries: list[ContextEntry]
+    ) -> tuple[int, int]:
+        """Tokens it would cost to read the whole files the selected symbols live in.
+
+        This is the honest counterfactual for an agent that has no retrieval: to see
+        the same code it would open these files in full. Uses token counts recorded
+        at index time, so there is no file I/O here.
+        """
+        paths = {e.candidate.file_path for e in entries}
+        if not paths or self.session is None:
+            return 0, 0
+        total = self.session.scalar(
+            select(func.coalesce(func.sum(SourceFile.token_count), 0)).where(
+                SourceFile.repository_id == repository_id,
+                SourceFile.path.in_(paths),
+            )
+        )
+        return int(total or 0), len(paths)
 
     def _attach_source(self, repository_id: int, candidates: list[Candidate]) -> None:
         need = [c.symbol_id for c in candidates if c.source_code is None]

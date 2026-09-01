@@ -78,6 +78,8 @@ def context(
                                           help="Override the context token budget."),
     show_prompt: bool = typer.Option(False, "--show-prompt",
                                      help="Print the full prompt that would go to the LLM."),
+    measure: bool = typer.Option(False, "--measure",
+                                 help="Compare against reading the whole files instead."),
 ) -> None:
     """Show the exact context (and token accounting) that WOULD be sent to the LLM.
 
@@ -108,6 +110,25 @@ def context(
             f"[bold]final_prompt_tokens[/] {acct.final_prompt_tokens}  "
             f"[green]reduction {acct.token_reduction_from_candidates}%[/]"
         )
+        if measure:
+            t = Table(title="Measured: reading whole files vs CodeRAG context")
+            t.add_column("approach")
+            t.add_column("input tokens", justify="right")
+            t.add_row(
+                f"read the {acct.baseline_files} whole file(s) containing this code",
+                f"{acct.baseline_tokens:,}",
+            )
+            t.add_row("CodeRAG budgeted context", f"{acct.context_tokens:,}")
+            t.add_row("CodeRAG full prompt (incl. scaffolding)",
+                      f"{acct.final_prompt_tokens:,}")
+            console.print(t)
+            if acct.baseline_tokens:
+                console.print(
+                    f"[green]saved {acct.tokens_saved_vs_files:,} tokens "
+                    f"({acct.reduction_vs_files}%) vs opening those files[/]"
+                )
+            else:
+                console.print("[yellow]No baseline recorded (nothing selected).[/]")
         if show_prompt:
             console.print("\n" + package.prompt_text)
 

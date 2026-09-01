@@ -154,6 +154,10 @@ class MetricsOut(BaseModel):
     total_context_tokens: int
     total_tokens_saved: int
     avg_token_reduction_percent: float
+    # "what reading whole files would have cost" baseline
+    total_baseline_tokens: int
+    total_saved_vs_files: int
+    reduction_vs_files_percent: float
 
 
 class QueryRow(BaseModel):
@@ -167,6 +171,10 @@ class QueryRow(BaseModel):
     context_tokens: int
     tokens_saved: int
     reduction_percent: float
+    baseline_tokens: int = 0
+    baseline_files: int = 0
+    saved_vs_files: int = 0
+    reduction_vs_files: float = 0.0
     retrieval_latency_ms: float
     llm_input_tokens: int | None = None
     llm_output_tokens: int | None = None

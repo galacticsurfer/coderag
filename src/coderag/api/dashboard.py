@@ -126,10 +126,12 @@ DASHBOARD_HTML = r"""<!doctype html>
     <div class="tablewrap">
       <table>
         <thead><tr>
-          <th class="l">#</th><th class="l">when</th><th class="l">mode</th>
+          <th class="l">#</th><th class="l">when</th><th class="l">mode</th><!-- 17 cols -->
           <th class="l">repo</th><th class="l">query</th>
           <th>found</th><th>selected</th><th>candidate</th><th>context</th>
-          <th>saved</th><th>reduction</th><th>retr ms</th><th>llm in</th><th>llm out</th>
+          <th>saved</th><th>reduction</th>
+          <th>whole files</th><th>saved vs files</th><th>vs files</th>
+          <th>retr ms</th><th>llm in</th><th>llm out</th>
         </tr></thead>
         <tbody id="rows"></tbody>
       </table>
@@ -150,7 +152,10 @@ function tile(label, val, unit, hero){
 
 function renderKpis(m){
   document.getElementById('kpis').innerHTML =
-    tile('Tokens saved', n(m.total_tokens_saved), '', true) +
+    tile('Saved vs reading files', n(m.total_saved_vs_files), 'tok', true) +
+    tile('Reduction vs files', pct(m.reduction_vs_files_percent), '', true) +
+    tile('Whole-file baseline', n(m.total_baseline_tokens), 'tok') +
+    tile('Tokens saved (budgeting)', n(m.total_tokens_saved)) +
     tile('Overall reduction', pct(m.avg_token_reduction_percent)) +
     tile('Queries', n(m.queries)) +
     tile('Context sent', n(m.total_context_tokens), 'tok') +
@@ -183,7 +188,7 @@ function renderBars(rows){
 
 function renderTable(rows){
   const tb = document.getElementById('rows');
-  if(!rows.length){ tb.innerHTML = '<tr><td class="l empty" colspan="14">No queries recorded yet.</td></tr>'; return; }
+  if(!rows.length){ tb.innerHTML = '<tr><td class="l empty" colspan="17">No queries recorded yet.</td></tr>'; return; }
   tb.innerHTML = rows.map(r => {
     const when = r.created_at ? new Date(r.created_at).toLocaleString() : '—';
     return `<tr>`+
@@ -196,6 +201,9 @@ function renderTable(rows){
       `<td>${n(r.candidate_tokens)}</td><td>${n(r.context_tokens)}</td>`+
       `<td style="color:var(--saved-ink);font-weight:600">${n(r.tokens_saved)}</td>`+
       `<td>${pct(r.reduction_percent)}</td>`+
+      `<td>${r.baseline_tokens? n(r.baseline_tokens)+' ('+r.baseline_files+'f)' : '—'}</td>`+
+      `<td style="color:var(--saved-ink);font-weight:600">${r.baseline_tokens? n(r.saved_vs_files):'—'}</td>`+
+      `<td>${r.baseline_tokens? pct(r.reduction_vs_files):'—'}</td>`+
       `<td>${n(r.retrieval_latency_ms)}</td>`+
       `<td>${n(r.llm_input_tokens)}</td><td>${n(r.llm_output_tokens)}</td>`+
     `</tr>`;

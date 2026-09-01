@@ -385,6 +385,7 @@ class Indexer:
         sf = SourceFile(
             repository_id=repo.id, path=rel_path, language=parser.language,
             content_hash=_hash(content), size_bytes=len(content.encode("utf-8")),
+            token_count=self.tokens.count(content),
             indexed_commit_sha=commit,
         )
         self.session.add(sf)

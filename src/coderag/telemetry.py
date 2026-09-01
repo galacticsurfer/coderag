@@ -29,6 +29,8 @@ def record_query(
         candidate_tokens=acct.candidate_tokens if acct else 0,
         context_tokens=acct.context_tokens if acct else 0,
         dropped_tokens=acct.dropped_tokens if acct else 0,
+        baseline_tokens=acct.baseline_tokens if acct else 0,
+        baseline_files=acct.baseline_files if acct else 0,
         retrieval_latency_ms=retrieval_latency_ms,
     )
     session.add(record)

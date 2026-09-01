@@ -66,6 +66,9 @@ class SourceFile(Base):
     language: Mapped[str] = mapped_column(String(32))
     content_hash: Mapped[str] = mapped_column(String(64))
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    # Whole-file token count, recorded at index time so the "what would reading
+    # this file have cost?" baseline needs no file I/O at query time.
+    token_count: Mapped[int] = mapped_column(Integer, default=0)
     indexed_commit_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[TS] = mapped_column(server_default=func.now())
     updated_at: Mapped[TS] = mapped_column(server_default=func.now(), onupdate=func.now())
@@ -214,6 +217,10 @@ class QueryRecord(Base):
     candidate_tokens: Mapped[int] = mapped_column(Integer, default=0)
     context_tokens: Mapped[int] = mapped_column(Integer, default=0)
     dropped_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    # Counterfactual: tokens it would have cost to read the whole files that the
+    # selected symbols came from (the "just open the files" baseline).
+    baseline_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    baseline_files: Mapped[int] = mapped_column(Integer, default=0)
     retrieval_latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[TS] = mapped_column(server_default=func.now())
 

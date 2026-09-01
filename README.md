@@ -171,11 +171,31 @@ On the bundled demo (offline `hashing` embedder), measured:
 | search latency p50 / p95 | ~6 ms / ~9 ms |
 | context reduction vs whole-repo baseline | ~13% |
 
-**On token savings, honestly:** the demo repo is tiny (~1.9k tokens total), so whole-repo
-reduction is modest. Savings scale with repository size — on a real codebase you send a few
-thousand budgeted tokens instead of the whole repo. The point is that it's **measured**
-(`coderag benchmark`), never asserted. Recall@1 is limited by the offline hashing embedder;
-the local SentenceTransformers model improves ranking.
+### Measure it on your own repo (`--measure`)
+
+```bash
+coderag context "why can payment retry leave an invoice pending?" --measure
+```
+
+reports the counterfactual an agent actually faces — *"instead of this context I'd have opened
+the files"* — using per-file token counts recorded at index time:
+
+| approach | input tokens |
+|---|---|
+| read the 8 whole files containing this code | 1,654 |
+| CodeRAG budgeted context | 1,516 |
+| CodeRAG full prompt (incl. scaffolding) | 2,648 |
+
+**Read that honestly: on the bundled demo that's only 8.3% saved, and the full prompt is bigger
+than the files it replaces.** That's a real measurement, not a bug — with 11 tiny files, one-hop
+expansion reaches most of the repo and fixed scaffolding (~1.1k tokens) dominates. Savings scale
+with *file size ÷ symbol size*: pulling one 40-line method out of a 900-line service is where
+this wins, and that ratio is routine on a real backend. Recall@1 is likewise limited by the
+offline hashing embedder; the local SentenceTransformers model improves ranking.
+
+**So run `--measure` on your repository before believing any headline number, including ours.**
+That's why the measurement ships instead of a claim. See
+[`docs/evaluation.md`](docs/evaluation.md).
 
 ## Security model
 

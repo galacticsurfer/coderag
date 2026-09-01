@@ -274,6 +274,17 @@ def metrics(session: Session = Depends(get_session)) -> s.MetricsOut:
     ) or 0
     saved = int(cand_sum) - int(ctx_sum)
     reduction = round(100.0 * saved / cand_sum, 1) if cand_sum else 0.0
+    base_sum = int(session.scalar(
+        select(func.coalesce(func.sum(QueryRecord.baseline_tokens), 0))
+    ) or 0)
+    # only queries that actually recorded a baseline contribute to this comparison
+    base_ctx = int(session.scalar(
+        select(func.coalesce(func.sum(QueryRecord.context_tokens), 0)).where(
+            QueryRecord.baseline_tokens > 0
+        )
+    ) or 0)
+    saved_vs_files = base_sum - base_ctx
+    reduction_vs_files = round(100.0 * saved_vs_files / base_sum, 1) if base_sum else 0.0
     return s.MetricsOut(
         repositories=count(Repository), symbols=count(Symbol),
         embeddings=count(SymbolEmbedding), relationships=count(SymbolRelationship),
@@ -283,6 +294,8 @@ def metrics(session: Session = Depends(get_session)) -> s.MetricsOut:
         total_llm_input_tokens=int(in_tok), total_llm_output_tokens=int(out_tok),
         total_candidate_tokens=int(cand_sum), total_context_tokens=int(ctx_sum),
         total_tokens_saved=saved, avg_token_reduction_percent=reduction,
+        total_baseline_tokens=base_sum, total_saved_vs_files=saved_vs_files,
+        reduction_vs_files_percent=reduction_vs_files,
     )
 
 
@@ -317,6 +330,12 @@ def recent_queries(
             candidates_found=q.candidates_found, candidates_selected=q.candidates_selected,
             candidate_tokens=q.candidate_tokens, context_tokens=q.context_tokens,
             tokens_saved=saved, reduction_percent=reduction,
+            baseline_tokens=q.baseline_tokens, baseline_files=q.baseline_files,
+            saved_vs_files=q.baseline_tokens - q.context_tokens if q.baseline_tokens else 0,
+            reduction_vs_files=(
+                round(100.0 * (q.baseline_tokens - q.context_tokens) / q.baseline_tokens, 1)
+                if q.baseline_tokens else 0.0
+            ),
             retrieval_latency_ms=round(q.retrieval_latency_ms, 2),
             llm_input_tokens=li, llm_output_tokens=lo,
             created_at=q.created_at.isoformat() if q.created_at else "",

@@ -160,6 +160,21 @@ The **VS Code extension** (`vscode-extension/`, prebuilt `.vsix` on the
 gives you Index/Search/Ask/Dashboard commands in the editor UI. The MCP server is what makes
 **Claude Code** itself cheaper. You can use either or both.
 
+## Step 8 — Measure it on *your* repo before believing any claim
+
+```bash
+coderag context "why does <something in your codebase> happen?" --repo myrepo --measure
+```
+
+prints the counterfactual: tokens to read the whole files containing that code vs the budgeted
+context CodeRAG returns. The same numbers are persisted per query and shown on the dashboard
+("Saved vs reading files", "Reduction vs files"), including for MCP calls made by Claude Code.
+
+**On the bundled demo repo this measures only ~8%** — 11 tiny files, so retrieval reaches most of
+the repo and fixed prompt scaffolding dominates. The win scales with *file size ÷ symbol size*:
+on a real backend where you need one method out of a 900-line service, it is far larger. Run the
+command above on your repository to get your real number — do not take ours.
+
 ## Honest expectations
 
 - Savings scale with **repository size** — on a small repo the difference is minor; on a large

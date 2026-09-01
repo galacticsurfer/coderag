@@ -41,12 +41,27 @@ class TokenAccounting:
     context_tokens: int = 0        # tokens across SELECTED code
     dropped_tokens: int = 0        # tokens of candidates dropped by budget/dedup
     final_prompt_tokens: int = 0   # tokens of the fully assembled prompt
+    # Counterfactual baseline: reading the whole files the selected symbols live in
+    # (what an agent without retrieval would have loaded).
+    baseline_tokens: int = 0
+    baseline_files: int = 0
 
     @property
     def token_reduction_from_candidates(self) -> float:
         if self.candidate_tokens <= 0:
             return 0.0
         return round(100.0 * (1.0 - self.context_tokens / self.candidate_tokens), 1)
+
+    @property
+    def tokens_saved_vs_files(self) -> int:
+        """Tokens avoided versus opening the whole files (never negative-by-surprise)."""
+        return self.baseline_tokens - self.context_tokens
+
+    @property
+    def reduction_vs_files(self) -> float:
+        if self.baseline_tokens <= 0:
+            return 0.0
+        return round(100.0 * (1.0 - self.context_tokens / self.baseline_tokens), 1)
 
     def as_dict(self) -> dict:
         return {
@@ -58,6 +73,10 @@ class TokenAccounting:
             "dropped_tokens": self.dropped_tokens,
             "final_prompt_tokens": self.final_prompt_tokens,
             "token_reduction_from_candidates": self.token_reduction_from_candidates,
+            "baseline_tokens": self.baseline_tokens,
+            "baseline_files": self.baseline_files,
+            "tokens_saved_vs_files": self.tokens_saved_vs_files,
+            "reduction_vs_files": self.reduction_vs_files,
         }
 
 
