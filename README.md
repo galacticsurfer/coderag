@@ -229,6 +229,23 @@ Licensed under **Apache-2.0** (see [`LICENSE`](LICENSE) / [`NOTICE`](NOTICE)). D
 licenses (incl. the psycopg LGPL and pylint GPL flags) are in
 [`docs/licenses.md`](docs/licenses.md).
 
+## Use it to cut Claude Code's token usage (MCP)
+
+Claude Code reads whole files to build context. Register CodeRAG as an **MCP server** and it can
+call `coderag_context` / `coderag_search` instead — getting only the budgeted, relevant symbols:
+
+```bash
+pipx install "coderag[mcp] @ git+https://github.com/galacticsurfer/coderag"
+claude mcp add coderag \
+  --env CODERAG_DATABASE_URL=postgresql+psycopg://coderag:coderag@localhost:5432/coderag \
+  --env CODERAG_DEFAULT_REPOSITORY=myrepo -- coderag-mcp
+```
+
+Tools: `coderag_context`, `coderag_search`, `coderag_symbol`, `coderag_repositories`,
+`coderag_index`. Every call is recorded, so `/dashboard` shows the savings live. No API key
+needed — Claude Code is the LLM. **Full step-by-step:**
+[`docs/claude-code.md`](docs/claude-code.md).
+
 ## Editor integration (VS Code)
 
 A ready-to-build extension lives in [`vscode-extension/`](vscode-extension/) — commands for

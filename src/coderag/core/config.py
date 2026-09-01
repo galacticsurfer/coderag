@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     )
     db_echo: bool = False
 
+    # Default repository name used when a request doesn't name one (handy for the
+    # MCP server / CLI when several repositories are indexed).
+    default_repository: str | None = None
+
     # ---- Embeddings -----------------------------------------------------
     # "hashing"  -> deterministic, dependency-free (default; offline, great for tests)
     # "sentence_transformer" -> local SentenceTransformers model (needs `embeddings` extra)

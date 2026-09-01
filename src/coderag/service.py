@@ -26,6 +26,8 @@ class AmbiguousRepository(Exception):
 
 
 def resolve_repository(session: Session, name: str | None = None) -> Repository:
+    # fall back to a configured default (CODERAG_DEFAULT_REPOSITORY) when unnamed
+    name = name or get_settings().default_repository
     if name:
         repo = session.scalar(select(Repository).where(Repository.name == name))
         if repo is None:

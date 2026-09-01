@@ -39,6 +39,8 @@ tokens = ["tiktoken>=0.7"]
 metrics = ["prometheus-client>=0.20"]
 # Static-analysis adapters (Phase 10).
 analyzers = ["pylint>=3.2", "flake8>=7.1"]
+# MCP server: lets Claude Code (and other MCP clients) call CodeRAG retrieval.
+mcp = ["mcp>=2.0"]
 # Development / testing.
 dev = [
     "pytest>=8.2",
@@ -51,6 +53,7 @@ dev = [
 
 [project.scripts]
 coderag = "coderag.cli.main:app"
+coderag-mcp = "coderag.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/coderag"]
