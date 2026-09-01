@@ -44,6 +44,21 @@ class GitRepo:
         except (subprocess.CalledProcessError, FileNotFoundError):
             return False
 
+    def commit_exists(self, sha: str) -> bool:
+        """True if ``sha`` resolves to a commit object in this repository.
+
+        A rebase, amend, or force-push can orphan a previously-indexed commit;
+        diffing against it would fail, so callers check first and fall back to a
+        full index.
+        """
+        if not sha:
+            return False
+        try:
+            self._git("cat-file", "-e", f"{sha}^{{commit}}")
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return False
+
     def current_commit(self) -> str | None:
         try:
             return self._git("rev-parse", "HEAD").strip()

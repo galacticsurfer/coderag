@@ -126,3 +126,54 @@ def test_incremental_rebuilds_cross_file_edges(db_session, tmp_path):
         )
     )
     assert edge is not None  # cross-file edge from unchanged app.py rebuilt correctly
+
+
+def _init_simple(root):
+    _git(root, "init", "-b", "main")
+    _git(root, "config", "user.email", "t@t.co")
+    _git(root, "config", "user.name", "t")
+    _write(root, "a.py", "def foo():\n    return 1\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "c1")
+
+
+def test_incremental_falls_back_when_base_commit_is_unknown(db_session, tmp_path):
+    """A bogus/missing base SHA must rebuild, not raise."""
+    _init_simple(tmp_path)
+    repo = get_or_create_repository(db_session, "fb1", str(tmp_path))
+    Indexer(db_session).full_index(repo)
+    db_session.commit()
+
+    repo.indexed_commit_sha = "0" * 40  # commit that does not exist
+    db_session.flush()
+
+    run, stats = Indexer(db_session).incremental_index(repo)
+    db_session.commit()
+    assert run.mode == "full" and run.status == "success"
+    assert "a.foo" in _quals(db_session, repo.id)
+
+
+def test_incremental_falls_back_after_history_rewrite(db_session, tmp_path):
+    """Amending the indexed commit orphans it; indexing must still succeed."""
+    _init_simple(tmp_path)
+    repo = get_or_create_repository(db_session, "fb2", str(tmp_path))
+    Indexer(db_session).full_index(repo)
+    db_session.commit()
+    old_sha = repo.indexed_commit_sha
+
+    # rewrite history so the indexed commit is unreachable, then prune it
+    _write(tmp_path, "a.py", "def foo():\n    return 1\n\ndef bar():\n    return 2\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "--amend", "-m", "c1-amended")
+    _git(tmp_path, "reflog", "expire", "--expire=now", "--all")
+    _git(tmp_path, "gc", "--prune=now", "--quiet")
+
+    from coderag.git.repo import GitRepo
+
+    assert not GitRepo(str(tmp_path)).commit_exists(old_sha), "commit should be gone"
+
+    run, stats = Indexer(db_session).incremental_index(repo)
+    db_session.commit()
+    assert run.mode == "full" and run.status == "success"
+    quals = _quals(db_session, repo.id)
+    assert {"a.foo", "a.bar"} <= quals  # amended content picked up

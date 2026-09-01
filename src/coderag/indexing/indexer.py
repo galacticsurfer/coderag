@@ -9,6 +9,7 @@ Phase 8.
 from __future__ import annotations
 
 import hashlib
+import subprocess
 import time
 from dataclasses import dataclass
 
@@ -155,6 +156,14 @@ class Indexer:
         head = git.current_commit()
         if not git.is_git() or not base:
             return self.full_index(repo)
+        if not git.commit_exists(base):
+            # The previously-indexed commit is gone (rebase / amend / force-push),
+            # so there is no valid diff base. Rebuild instead of failing.
+            log.warning(
+                "incremental_index.base_missing", repository=repo.name,
+                base=base[:12], action="falling back to full index",
+            )
+            return self.full_index(repo)
 
         started = time.perf_counter()
         run = IndexingRun(repository_id=repo.id, mode="incremental", status="running",
@@ -166,7 +175,18 @@ class Indexer:
         self._pending_rels = []
         stats = IndexStats(commit_sha=head)
         try:
-            diff = git.diff(base, head or "HEAD")
+            try:
+                diff = git.diff(base, head or "HEAD")
+            except subprocess.CalledProcessError:
+                # Unexpected diff failure (shallow clone, corrupt object, …):
+                # a full rebuild is always correct, so prefer it over erroring.
+                log.warning(
+                    "incremental_index.diff_failed", repository=repo.name,
+                    action="falling back to full index",
+                )
+                run.status = "superseded"
+                self.session.flush()
+                return self.full_index(repo)
             changed = [p for p in diff.changed if should_index(p, self.extra_ignore)]
             gone = set(changed) | set(diff.deleted)
             for path in gone:
