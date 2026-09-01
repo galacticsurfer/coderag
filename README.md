@@ -46,6 +46,22 @@ Full details: [`docs/architecture.md`](docs/architecture.md), plus ADRs in
 [security](docs/security.md), [evaluation](docs/evaluation.md),
 [LLM providers](docs/llm-providers.md), and [adding a language](docs/adding-language.md).
 
+## Install
+
+```bash
+# from source (this repo)
+pip install git+https://github.com/galacticsurfer/coderag
+# with local semantic embeddings (pulls torch)
+pip install "coderag[embeddings] @ git+https://github.com/galacticsurfer/coderag"
+# or clone + editable
+git clone https://github.com/galacticsurfer/coderag && cd coderag && pip install -e ".[dev]"
+```
+
+This installs the `coderag` CLI and the `coderag.api.app` FastAPI app. Extras: `embeddings`
+(SentenceTransformers), `tokens` (tiktoken), `analyzers` (pylint/flake8), `metrics`
+(prometheus). You still need a PostgreSQL+pgvector to point `CODERAG_DATABASE_URL` at
+(`docker compose up -d` provides one).
+
 ## Quick start
 
 ```bash
@@ -173,5 +189,12 @@ make lint typecheck test      # ruff + mypy + pytest
 Tests use [`pgserver`](https://pypi.org/project/pgserver/) — a rootless, bundled
 PostgreSQL+pgvector — so the DB/FTS/vector paths are exercised for real, no Docker required.
 
-Licensed under **Apache-2.0**. Dependency licenses (incl. the psycopg LGPL and pylint GPL
-flags) are in [`docs/licenses.md`](docs/licenses.md).
+Licensed under **Apache-2.0** (see [`LICENSE`](LICENSE) / [`NOTICE`](NOTICE)). Dependency
+licenses (incl. the psycopg LGPL and pylint GPL flags) are in
+[`docs/licenses.md`](docs/licenses.md).
+
+## Editor integration
+
+A VS Code extension is a thin client over the HTTP API — step-by-step recipe (scaffold →
+call `/search`,`/context`,`/ask` → package `.vsix`) in
+[`docs/vscode-extension.md`](docs/vscode-extension.md).
