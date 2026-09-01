@@ -49,8 +49,27 @@ def start(pgdata: Path | str | None = None) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     # cleanup_mode=None -> the postmaster keeps running after we exit.
     server = pgserver.get_server(str(path), cleanup_mode=None)
-    server.psql("CREATE EXTENSION IF NOT EXISTS vector;")
-    return sqlalchemy_url(server.get_uri())
+    url = sqlalchemy_url(server.get_uri())
+    _ensure_vector_extension(url)
+    return url
+
+
+def _ensure_vector_extension(url: str) -> None:
+    """Create the pgvector extension over a normal connection.
+
+    Deliberately does NOT use pgserver's bundled ``psql`` binary: on macOS that
+    executable can fail to run (exit 127), which would break `localdb start` even
+    though the server itself is healthy. psycopg is already a dependency, so we
+    talk to the server the same way the rest of the application does.
+    """
+    from sqlalchemy import create_engine, text
+
+    engine = create_engine(url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    finally:
+        engine.dispose()
 
 
 def stop(pgdata: Path | str | None = None, timeout: float = 15.0) -> None:
