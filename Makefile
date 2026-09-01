@@ -36,6 +36,17 @@ typecheck: ## mypy
 run: ## Run the API locally
 	. $(VENV)/bin/activate && uvicorn coderag.api.app:app --reload
 
+up: ## One-shot: build + start Postgres and the API (auto-migrate + demo index)
+	docker compose up -d --build
+	@echo "API:       http://localhost:8000"
+	@echo "Dashboard: http://localhost:8000/dashboard"
+
+down: ## Stop the stack (keeps the pgdata volume)
+	docker compose down
+
+logs: ## Follow the API logs
+	docker compose logs -f api
+
 demo: ## Index the bundled demo repo and run a sample search (no LLM needed)
 	. $(VENV)/bin/activate && coderag index ./examples/demo-repository \
 		&& coderag search "where are failed payments retried?"

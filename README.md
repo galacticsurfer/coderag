@@ -64,22 +64,46 @@ This installs the `coderag` CLI and the `coderag.api.app` FastAPI app. Extras: `
 
 ## Quick start
 
+### Option A — Docker one-shot (recommended)
+
+One command boots PostgreSQL+pgvector **and** the API, runs migrations, and indexes the bundled
+demo repo so the dashboard has data immediately:
+
+```bash
+make up          # == docker compose up -d --build
+# open http://localhost:8000/dashboard   and   http://localhost:8000/docs
+```
+
+Index *your own* code (mount it, then run the indexer inside the container):
+
+```bash
+CODERAG_REPO_PATH=/abs/path/to/your/repo make up
+docker compose exec api coderag index /workspace --name myrepo
+docker compose exec api coderag search "where are failed payments retried?" --repo myrepo
+```
+
+### Option B — Local (venv)
+
 ```bash
 cp .env.example .env
-docker compose up -d          # PostgreSQL + pgvector
-make install                  # venv + deps (dev extras include a rootless test Postgres)
-make migrate                  # alembic upgrade head
-
+docker compose up -d db                         # just Postgres+pgvector
+make install && make migrate
 coderag index ./examples/demo-repository
-coderag search "where are failed payments retried?"                 # no LLM needed
+coderag search  "where are failed payments retried?"                # no LLM needed
 coderag context "why can payment retry leave an invoice pending?"   # no LLM needed
 coderag eval                                                        # Recall@K, MRR, tokens
 coderag benchmark --compare-baseline                                # measured token savings
-# configure a provider (below), then:
-coderag ask "why can payment retry leave an invoice pending?"
+coderag ask     "why can payment retry leave an invoice pending?"   # needs an LLM (see below)
 ```
 
-Everything except `ask` runs **without any LLM credentials**.
+### Do I need an API key?
+
+**No — for almost everything.** `index`, `search`, `context`, `eval`, `benchmark`, and the
+`/dashboard` are pure retrieval + local embeddings + telemetry: **no key, nothing leaves your
+box.** Only **`ask`** calls an LLM to turn the retrieved context into a natural-language answer,
+so only `ask` needs `CODERAG_ANTHROPIC_API_KEY` (or an internal proxy / Bedrock — see
+[`docs/llm-providers.md`](docs/llm-providers.md)). That separation is the whole point: you can
+run, measure, and demo the token savings with zero LLM credentials.
 
 ## Indexing
 
