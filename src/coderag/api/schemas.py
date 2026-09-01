@@ -149,3 +149,25 @@ class MetricsOut(BaseModel):
     avg_retrieval_latency_ms: float
     total_llm_input_tokens: int
     total_llm_output_tokens: int
+    # token-savings aggregates (candidate set -> budgeted context)
+    total_candidate_tokens: int
+    total_context_tokens: int
+    total_tokens_saved: int
+    avg_token_reduction_percent: float
+
+
+class QueryRow(BaseModel):
+    id: int
+    repository: str
+    mode: str
+    query: str
+    candidates_found: int
+    candidates_selected: int
+    candidate_tokens: int
+    context_tokens: int
+    tokens_saved: int
+    reduction_percent: float
+    retrieval_latency_ms: float
+    llm_input_tokens: int | None = None
+    llm_output_tokens: int | None = None
+    created_at: str

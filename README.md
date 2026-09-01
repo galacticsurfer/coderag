@@ -178,7 +178,19 @@ See [`SECURITY.md`](SECURITY.md) and [`docs/security.md`](docs/security.md).
 
 `uvicorn coderag.api.app:app` exposes `POST /repositories`, `/repositories/{id}/index`,
 `GET /repositories/{id}/index/status`, `POST /search`, `POST /context`, `POST /ask`,
-`GET /symbols/{id}`, `/symbols/{id}/relationships`, and `GET /metrics`.
+`GET /symbols/{id}`, `/symbols/{id}/relationships`, `GET /metrics`, `GET /queries`, and a
+`GET /dashboard` page.
+
+## Dashboard
+
+A self-contained observability page at **`/dashboard`** (no external assets, light/dark) shows
+*what was queried and how many tokens the budgeted context saved* — KPI tiles (tokens saved,
+overall reduction, LLM tokens), a per-query "context vs. saved" bar chart, and a full query log.
+It reads the persisted `queries`/`llm_requests` telemetry via `GET /metrics` and `GET /queries`.
+
+```bash
+uvicorn coderag.api.app:app --port 8000   # then open http://localhost:8000/dashboard
+```
 
 ## Development
 
@@ -193,8 +205,18 @@ Licensed under **Apache-2.0** (see [`LICENSE`](LICENSE) / [`NOTICE`](NOTICE)). D
 licenses (incl. the psycopg LGPL and pylint GPL flags) are in
 [`docs/licenses.md`](docs/licenses.md).
 
-## Editor integration
+## Editor integration (VS Code)
 
-A VS Code extension is a thin client over the HTTP API — step-by-step recipe (scaffold →
-call `/search`,`/context`,`/ask` → package `.vsix`) in
+A ready-to-build extension lives in [`vscode-extension/`](vscode-extension/) — commands for
+**Index this workspace** (the indexing step, one click), **Search symbols**, **Show context**,
+**Ask about this code** (right-click), and **Open token dashboard**.
+
+```bash
+cd vscode-extension && npm install && npm run package   # → coderag-vscode-0.1.0.vsix
+code --install-extension coderag-vscode-0.1.0.vsix
+```
+
+Or download the prebuilt `.vsix` from the repo's
+[Releases](https://github.com/galacticsurfer/coderag/releases). It's a thin client — point
+`coderag.serverUrl` at your running CodeRAG server. Design notes:
 [`docs/vscode-extension.md`](docs/vscode-extension.md).

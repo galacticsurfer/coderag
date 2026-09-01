@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -265,6 +266,14 @@ def metrics(session: Session = Depends(get_session)) -> s.MetricsOut:
     avg_lat = session.scalar(select(func.avg(QueryRecord.retrieval_latency_ms))) or 0.0
     in_tok = session.scalar(select(func.coalesce(func.sum(LLMRequest.input_tokens), 0))) or 0
     out_tok = session.scalar(select(func.coalesce(func.sum(LLMRequest.output_tokens), 0))) or 0
+    cand_sum = session.scalar(
+        select(func.coalesce(func.sum(QueryRecord.candidate_tokens), 0))
+    ) or 0
+    ctx_sum = session.scalar(
+        select(func.coalesce(func.sum(QueryRecord.context_tokens), 0))
+    ) or 0
+    saved = int(cand_sum) - int(ctx_sum)
+    reduction = round(100.0 * saved / cand_sum, 1) if cand_sum else 0.0
     return s.MetricsOut(
         repositories=count(Repository), symbols=count(Symbol),
         embeddings=count(SymbolEmbedding), relationships=count(SymbolRelationship),
@@ -272,4 +281,51 @@ def metrics(session: Session = Depends(get_session)) -> s.MetricsOut:
         avg_context_tokens=round(float(avg_ctx), 1),
         avg_retrieval_latency_ms=round(float(avg_lat), 2),
         total_llm_input_tokens=int(in_tok), total_llm_output_tokens=int(out_tok),
+        total_candidate_tokens=int(cand_sum), total_context_tokens=int(ctx_sum),
+        total_tokens_saved=saved, avg_token_reduction_percent=reduction,
     )
+
+
+@app.get("/queries", response_model=list[s.QueryRow])
+def recent_queries(
+    limit: int = 100, session: Session = Depends(get_session)
+) -> list[s.QueryRow]:
+    rows = session.execute(
+        select(QueryRecord, Repository.name)
+        .join(Repository, Repository.id == QueryRecord.repository_id)
+        .order_by(QueryRecord.id.desc())
+        .limit(limit)
+    ).all()
+    # sum LLM tokens per query in one pass
+    llm = {
+        qid: (int(itok), int(otok))
+        for qid, itok, otok in session.execute(
+            select(
+                LLMRequest.query_id,
+                func.coalesce(func.sum(LLMRequest.input_tokens), 0),
+                func.coalesce(func.sum(LLMRequest.output_tokens), 0),
+            ).group_by(LLMRequest.query_id)
+        ).all()
+    }
+    out: list[s.QueryRow] = []
+    for q, repo_name in rows:
+        saved = q.candidate_tokens - q.context_tokens
+        reduction = round(100.0 * saved / q.candidate_tokens, 1) if q.candidate_tokens else 0.0
+        li, lo = llm.get(q.id, (None, None))
+        out.append(s.QueryRow(
+            id=q.id, repository=repo_name, mode=q.mode, query=q.query_text,
+            candidates_found=q.candidates_found, candidates_selected=q.candidates_selected,
+            candidate_tokens=q.candidate_tokens, context_tokens=q.context_tokens,
+            tokens_saved=saved, reduction_percent=reduction,
+            retrieval_latency_ms=round(q.retrieval_latency_ms, 2),
+            llm_input_tokens=li, llm_output_tokens=lo,
+            created_at=q.created_at.isoformat() if q.created_at else "",
+        ))
+    return out
+
+
+@app.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
+def dashboard() -> str:
+    from coderag.api.dashboard import DASHBOARD_HTML
+
+    return DASHBOARD_HTML

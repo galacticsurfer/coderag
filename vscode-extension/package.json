@@ -1,0 +1,55 @@
+{
+  "name": "coderag-vscode",
+  "displayName": "CodeRAG",
+  "description": "Token-efficient, structure-aware code search, context, and Q&A over a CodeRAG server.",
+  "version": "0.1.0",
+  "publisher": "coderag",
+  "license": "Apache-2.0",
+  "repository": { "type": "git", "url": "https://github.com/galacticsurfer/coderag" },
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Machine Learning", "Other"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "coderag.index", "title": "CodeRAG: Index this workspace" },
+      { "command": "coderag.search", "title": "CodeRAG: Search symbols" },
+      { "command": "coderag.context", "title": "CodeRAG: Show context for a question" },
+      { "command": "coderag.ask", "title": "CodeRAG: Ask about this code" },
+      { "command": "coderag.openDashboard", "title": "CodeRAG: Open token dashboard" }
+    ],
+    "menus": {
+      "editor/context": [
+        { "command": "coderag.ask", "group": "coderag@1", "when": "editorTextFocus" }
+      ]
+    },
+    "configuration": {
+      "title": "CodeRAG",
+      "properties": {
+        "coderag.serverUrl": {
+          "type": "string", "default": "http://localhost:8000",
+          "description": "Base URL of the CodeRAG API server."
+        },
+        "coderag.repository": {
+          "type": "string", "default": "",
+          "description": "Repository name to query (defaults to the workspace folder name)."
+        },
+        "coderag.apiToken": {
+          "type": "string", "default": "",
+          "description": "Optional principal sent as the x-user header for authorization."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package --allow-missing-repository --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0",
+    "@vscode/vsce": "^2.24.0"
+  }
+}

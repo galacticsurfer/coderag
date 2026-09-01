@@ -1,0 +1,229 @@
+"""Self-contained observability dashboard (served at GET /dashboard).
+
+Read-only view over persisted telemetry: what was queried and how many tokens the
+budgeted context saved versus the retrieved candidate set. No external assets
+(CSP-safe), no template engine — the page fetches /metrics and /queries as JSON.
+Colours use the validated data-viz palette (blue = context sent to the LLM,
+green = tokens saved; neutral track), theme-aware for light/dark.
+"""
+
+from __future__ import annotations
+
+DASHBOARD_HTML = r"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CodeRAG · Token Dashboard</title>
+<style>
+  :root{
+    color-scheme: light;
+    --plane:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+    --grid:#e1e0d9; --ring:rgba(11,11,11,.10);
+    --context:#2a78d6; --saved:#0ca30c; --saved-ink:#006300; --track:#e1e0d9;
+    --shadow:0 1px 2px rgba(11,11,11,.05),0 4px 16px rgba(11,11,11,.06);
+  }
+  @media (prefers-color-scheme:dark){ :root:where(:not([data-theme="light"])){
+    color-scheme:dark;
+    --plane:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --ring:rgba(255,255,255,.10);
+    --context:#3987e5; --saved:#0ca30c; --saved-ink:#0ca30c; --track:#2c2c2a;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 16px rgba(0,0,0,.5);
+  }}
+  :root[data-theme="dark"]{
+    color-scheme:dark;
+    --plane:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --ring:rgba(255,255,255,.10);
+    --context:#3987e5; --saved:#0ca30c; --saved-ink:#0ca30c; --track:#2c2c2a;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 16px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--plane);color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.45}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 64px}
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:16px;
+    flex-wrap:wrap;margin-bottom:22px}
+  h1{font-size:20px;margin:0;letter-spacing:-.01em}
+  h1 .dot{color:var(--context)}
+  .sub{color:var(--ink2);font-size:13px;margin-top:3px}
+  .controls{display:flex;gap:8px;align-items:center}
+  button{font:inherit;font-size:13px;color:var(--ink2);background:var(--surface);
+    border:1px solid var(--ring);border-radius:8px;padding:6px 12px;cursor:pointer}
+  button:hover{color:var(--ink);border-color:var(--muted)}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:12px;
+    margin-bottom:26px}
+  .tile{background:var(--surface);border:1px solid var(--ring);border-radius:12px;
+    padding:14px 16px;box-shadow:var(--shadow)}
+  .tile .label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+  .tile .val{font-size:26px;margin-top:6px;font-variant-numeric:tabular-nums;
+    letter-spacing:-.02em}
+  .tile .unit{font-size:13px;color:var(--ink2);margin-left:3px}
+  .tile.hero .val{color:var(--saved-ink)}
+  .card{background:var(--surface);border:1px solid var(--ring);border-radius:12px;
+    padding:18px 18px 8px;box-shadow:var(--shadow);margin-bottom:24px}
+  .card h2{font-size:14px;margin:0 0 2px}
+  .card .hint{font-size:12px;color:var(--muted);margin:0 0 14px}
+  .legend{display:flex;gap:16px;font-size:12px;color:var(--ink2);margin:0 0 14px}
+  .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;
+    margin-right:6px;vertical-align:middle}
+  .bars{display:flex;flex-direction:column;gap:9px}
+  .bar-row{display:grid;grid-template-columns:190px 1fr 74px;gap:12px;align-items:center}
+  .bar-lbl{font-size:12px;color:var(--ink2);white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis}
+  .bar-lbl b{color:var(--ink);font-weight:600;font-size:10px;text-transform:uppercase;
+    letter-spacing:.04em;margin-right:6px}
+  .track{height:18px;background:var(--track);border-radius:5px;display:flex;overflow:hidden}
+  .seg{height:100%}
+  .seg.context{background:var(--context)}
+  .seg.saved{background:var(--saved);margin-left:2px}
+  .seg:first-child{border-radius:5px 0 0 5px}
+  .seg:last-child{border-radius:0 5px 5px 0}
+  .bar-red{font-size:12px;font-variant-numeric:tabular-nums;color:var(--saved-ink);
+    text-align:right;font-weight:600}
+  .tablewrap{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{padding:9px 10px;text-align:right;white-space:nowrap;
+    border-bottom:1px solid var(--grid);font-variant-numeric:tabular-nums}
+  th{color:var(--muted);font-weight:600;text-transform:uppercase;font-size:10.5px;
+    letter-spacing:.05em;position:sticky;top:0;background:var(--surface)}
+  td.l,th.l{text-align:left}
+  td.q{max-width:340px;overflow:hidden;text-overflow:ellipsis;color:var(--ink2)}
+  .badge{font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:2px 7px;
+    border-radius:999px;border:1px solid var(--ring);color:var(--ink2)}
+  .badge.ask{color:var(--context);border-color:var(--context)}
+  .empty{text-align:center;color:var(--muted);padding:48px 0;font-size:14px}
+  .foot{color:var(--muted);font-size:12px;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>CodeRAG<span class="dot">.</span> Token Dashboard</h1>
+      <div class="sub">What was queried, and how much context was saved before hitting the LLM.</div>
+    </div>
+    <div class="controls">
+      <button id="refresh">Refresh</button>
+      <button id="theme">◐ Theme</button>
+    </div>
+  </header>
+
+  <section class="kpis" id="kpis"></section>
+
+  <section class="card">
+    <h2>Context vs. saved — recent queries</h2>
+    <p class="hint">Bar length = retrieved candidate tokens. Blue = context actually sent; green = tokens saved by dedup + budgeting.</p>
+    <div class="legend">
+      <span><i style="background:var(--context)"></i>Context sent to LLM</span>
+      <span><i style="background:var(--saved)"></i>Tokens saved</span>
+    </div>
+    <div class="bars" id="bars"></div>
+  </section>
+
+  <section class="card">
+    <h2>Query log</h2>
+    <p class="hint">Most recent first. Saved = candidate tokens − context tokens.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr>
+          <th class="l">#</th><th class="l">when</th><th class="l">mode</th>
+          <th class="l">repo</th><th class="l">query</th>
+          <th>found</th><th>selected</th><th>candidate</th><th>context</th>
+          <th>saved</th><th>reduction</th><th>retr ms</th><th>llm in</th><th>llm out</th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="foot" id="foot"></div>
+  </section>
+</div>
+
+<script>
+const n = x => (x==null? "—" : Number(x).toLocaleString());
+const pct = x => (x==null? "—" : Number(x).toFixed(1) + "%");
+const esc = s => (s||"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function tile(label, val, unit, hero){
+  return `<div class="tile ${hero?'hero':''}"><div class="label">${label}</div>`+
+         `<div class="val">${val}${unit?`<span class="unit">${unit}</span>`:''}</div></div>`;
+}
+
+function renderKpis(m){
+  document.getElementById('kpis').innerHTML =
+    tile('Tokens saved', n(m.total_tokens_saved), '', true) +
+    tile('Overall reduction', pct(m.avg_token_reduction_percent)) +
+    tile('Queries', n(m.queries)) +
+    tile('Context sent', n(m.total_context_tokens), 'tok') +
+    tile('Candidate tokens', n(m.total_candidate_tokens), 'tok') +
+    tile('Avg retrieval', n(m.avg_retrieval_latency_ms), 'ms') +
+    tile('LLM input', n(m.total_llm_input_tokens), 'tok') +
+    tile('LLM output', n(m.total_llm_output_tokens), 'tok');
+}
+
+function renderBars(rows){
+  const el = document.getElementById('bars');
+  const shown = rows.slice(0, 16);
+  if(!shown.length){ el.innerHTML = '<div class="empty">No queries yet — run a search, context, or ask.</div>'; return; }
+  const max = Math.max(...shown.map(r => r.candidate_tokens || 0), 1);
+  el.innerHTML = shown.map(r => {
+    const total = (r.candidate_tokens/max)*100;
+    const ctx = r.candidate_tokens ? (r.context_tokens/r.candidate_tokens) : 0;
+    const cw = total*ctx, sw = total*(1-ctx);
+    const title = `${esc(r.query)}\ncandidate ${n(r.candidate_tokens)} · context ${n(r.context_tokens)} · saved ${n(r.tokens_saved)} (${pct(r.reduction_percent)})`;
+    return `<div class="bar-row" title="${title}">`+
+      `<div class="bar-lbl"><b>${r.mode}</b>${esc(r.query)}</div>`+
+      `<div class="track">`+
+        `<div class="seg context" style="width:${cw}%"></div>`+
+        `<div class="seg saved" style="width:${sw}%"></div>`+
+      `</div>`+
+      `<div class="bar-red">${pct(r.reduction_percent)}</div>`+
+    `</div>`;
+  }).join('');
+}
+
+function renderTable(rows){
+  const tb = document.getElementById('rows');
+  if(!rows.length){ tb.innerHTML = '<tr><td class="l empty" colspan="14">No queries recorded yet.</td></tr>'; return; }
+  tb.innerHTML = rows.map(r => {
+    const when = r.created_at ? new Date(r.created_at).toLocaleString() : '—';
+    return `<tr>`+
+      `<td class="l">${r.id}</td>`+
+      `<td class="l">${esc(when)}</td>`+
+      `<td class="l"><span class="badge ${r.mode==='ask'?'ask':''}">${esc(r.mode)}</span></td>`+
+      `<td class="l">${esc(r.repository)}</td>`+
+      `<td class="l q" title="${esc(r.query)}">${esc(r.query)}</td>`+
+      `<td>${n(r.candidates_found)}</td><td>${n(r.candidates_selected)}</td>`+
+      `<td>${n(r.candidate_tokens)}</td><td>${n(r.context_tokens)}</td>`+
+      `<td style="color:var(--saved-ink);font-weight:600">${n(r.tokens_saved)}</td>`+
+      `<td>${pct(r.reduction_percent)}</td>`+
+      `<td>${n(r.retrieval_latency_ms)}</td>`+
+      `<td>${n(r.llm_input_tokens)}</td><td>${n(r.llm_output_tokens)}</td>`+
+    `</tr>`;
+  }).join('');
+  document.getElementById('foot').textContent = `Showing ${rows.length} most recent queries.`;
+}
+
+async function load(){
+  try{
+    const [m, q] = await Promise.all([
+      fetch('metrics').then(r=>r.json()),
+      fetch('queries?limit=200').then(r=>r.json()),
+    ]);
+    renderKpis(m); renderBars(q); renderTable(q);
+  }catch(e){
+    document.getElementById('kpis').innerHTML =
+      '<div class="empty">Could not reach the API. Is the CodeRAG server running?</div>';
+  }
+}
+
+document.getElementById('refresh').onclick = load;
+document.getElementById('theme').onclick = () => {
+  const cur = document.documentElement.dataset.theme;
+  document.documentElement.dataset.theme = cur === 'dark' ? 'light' : (cur === 'light' ? 'dark' : 'light');
+};
+load();
+setInterval(load, 15000);
+</script>
+</body>
+</html>
+"""
