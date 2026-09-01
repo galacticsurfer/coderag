@@ -110,6 +110,34 @@ def context(
             console.print("\n" + package.prompt_text)
 
 
+@app.command()
+def ask(
+    query: str = typer.Argument(..., help="Question to answer with repo context + LLM."),
+    repo: str | None = typer.Option(None, "--repo"),
+    max_tokens: int | None = typer.Option(None, "--max-tokens", help="Context token budget."),
+    show_tokens: bool = typer.Option(True, "--show-tokens/--no-show-tokens"),
+) -> None:
+    """Retrieve context and ask the configured LLM (needs an LLM provider)."""
+    with session_scope() as session:
+        from coderag.service import run_ask
+
+        repo_obj, package, response, outcome = run_ask(
+            session, query, repo, max_tokens=max_tokens
+        )
+        console.print(f"\n[bold cyan]Answer[/] (repo: {repo_obj.name}):\n")
+        console.print(response.text)
+        if show_tokens:
+            u, a = response.usage, package.accounting
+            console.print(
+                f"\n[dim]retrieval {outcome.latency_ms:.0f}ms · llm {u.latency_ms:.0f}ms · "
+                f"model {u.model}[/]\n"
+                f"[dim]input_tokens {u.input_tokens} · output_tokens {u.output_tokens} · "
+                f"cached {u.cached_input_tokens} · "
+                f"context_tokens {a.context_tokens} (from {a.candidate_tokens} candidate "
+                f"tokens, -{a.token_reduction_from_candidates}%)[/]"
+            )
+
+
 def _print_candidates(repo_name: str, outcome) -> None:
     table = Table(title=f"Results in '{repo_name}'  ({outcome.latency_ms:.1f} ms)")
     table.add_column("#", justify="right", style="dim")

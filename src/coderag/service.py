@@ -80,16 +80,12 @@ def run_search(
     return repo, outcome
 
 
-def run_context(
-    session: Session, query: str, repo_name: str | None = None,
-    settings: Settings | None = None, *, semantic: bool = True, graph: bool = True,
-    max_tokens: int | None = None, finding: str | None = None,
-    changed_symbol_ids: set[int] | None = None, record: bool = True,
+def _retrieve_and_build(
+    session, query, repo_name, settings, semantic, graph, max_tokens, finding,
+    changed_symbol_ids,
 ):
-    """Retrieve, then build the exact context that WOULD be sent to the LLM."""
     from coderag.context.builder import ContextBuilder
 
-    settings = settings or get_settings()
     repo = resolve_repository(session, repo_name)
     engine = get_engine(settings, semantic=semantic, graph=graph)
     outcome = engine.search(session, repo.id, query, top_n=None)
@@ -98,9 +94,58 @@ def run_context(
         query, outcome.candidates, repo,
         changed_symbol_ids=changed_symbol_ids, finding=finding, max_tokens=max_tokens,
     )
+    return repo, package, outcome
+
+
+def run_context(
+    session: Session, query: str, repo_name: str | None = None,
+    settings: Settings | None = None, *, semantic: bool = True, graph: bool = True,
+    max_tokens: int | None = None, finding: str | None = None,
+    changed_symbol_ids: set[int] | None = None, record: bool = True,
+):
+    """Retrieve, then build the exact context that WOULD be sent to the LLM."""
+    settings = settings or get_settings()
+    repo, package, outcome = _retrieve_and_build(
+        session, query, repo_name, settings, semantic, graph, max_tokens, finding,
+        changed_symbol_ids,
+    )
     if record:
         from coderag.telemetry import record_query
 
         record_query(session, repo.id, query, "context", outcome.latency_ms,
                      package=package, candidates=outcome.candidates)
     return repo, package, outcome
+
+
+def run_ask(
+    session: Session, query: str, repo_name: str | None = None,
+    settings: Settings | None = None, *, semantic: bool = True, graph: bool = True,
+    max_tokens: int | None = None, max_output_tokens: int | None = None,
+    finding: str | None = None, changed_symbol_ids: set[int] | None = None,
+    provider=None,
+):
+    """Full pipeline: retrieve -> build context -> LLM -> answer, with accounting."""
+    from coderag.llm.base import LLMRequest
+    from coderag.llm.registry import get_llm_provider
+    from coderag.telemetry import record_llm_request, record_query
+
+    settings = settings or get_settings()
+    provider = provider or get_llm_provider(settings)
+    repo, package, outcome = _retrieve_and_build(
+        session, query, repo_name, settings, semantic, graph, max_tokens, finding,
+        changed_symbol_ids,
+    )
+    qrec = record_query(session, repo.id, query, "ask", outcome.latency_ms,
+                        package=package, candidates=outcome.candidates)
+    req = LLMRequest(
+        prompt=package.prompt_text,
+        max_tokens=max_output_tokens or settings.llm_max_output_tokens,
+    )
+    try:
+        response = provider.generate(req)
+    except Exception:
+        record_llm_request(session, qrec.id, getattr(provider, "name", "unknown"),
+                           provider.get_usage())
+        raise
+    record_llm_request(session, qrec.id, provider.name, response.usage)
+    return repo, package, response, outcome

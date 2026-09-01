@@ -68,9 +68,11 @@ class GraphExpander:
         additions: dict[int, tuple[set[str], float]] = {}
 
         def note(neighbor: int, reason: str, contribution: float) -> None:
+            # Use the STRONGEST single edge, not the sum, so highly-connected hub
+            # symbols don't get over-boosted above the actual target.
             reasons, score = additions.get(neighbor, (set(), 0.0))
             reasons.add(reason)
-            additions[neighbor] = (reasons, score + contribution)
+            additions[neighbor] = (reasons, max(score, contribution))
 
         seed_set = set(seed_ids)
         for src, tgt, rtype, conf in edges:

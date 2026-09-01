@@ -37,7 +37,7 @@ class SemanticRetriever:
                 WHERE repository_id = :rid
                   AND embedding_model = :model
                   AND embedding_version = :version
-                ORDER BY embedding <=> CAST(:q AS vector) ASC
+                ORDER BY embedding <=> CAST(:q AS vector) ASC, symbol_id ASC
                 LIMIT :limit
                 """
             ),

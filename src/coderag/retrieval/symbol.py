@@ -86,5 +86,6 @@ class SymbolRetriever:
                 if score > best.get(sid, 0.0):
                     best[sid] = score
 
-        ranked = sorted(best.items(), key=lambda kv: kv[1], reverse=True)[:limit]
+        # deterministic: by score desc, then symbol id asc for stable tie-breaking
+        ranked = sorted(best.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
         return [RawHit(symbol_id=sid, score=score) for sid, score in ranked]

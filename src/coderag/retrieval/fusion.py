@@ -38,4 +38,4 @@ def reciprocal_rank_fusion(
             if source not in entry.source_ranks or rank < entry.source_ranks[source]:
                 entry.source_ranks[source] = rank
                 entry.source_scores[source] = hit.score
-    return sorted(entries.values(), key=lambda e: e.score, reverse=True)
+    return sorted(entries.values(), key=lambda e: (-e.score, e.symbol_id))

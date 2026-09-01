@@ -5,7 +5,8 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from coderag.context.package import ContextPackage
-from coderag.db.models import QueryRecord, RetrievalResult
+from coderag.db.models import LLMRequest, QueryRecord, RetrievalResult
+from coderag.llm.base import Usage
 from coderag.retrieval.base import Candidate
 
 
@@ -48,3 +49,22 @@ def record_query(
             )
         session.flush()
     return record
+
+
+def record_llm_request(
+    session: Session, query_id: int | None, provider: str, usage: Usage
+) -> LLMRequest:
+    row = LLMRequest(
+        query_id=query_id,
+        provider=provider,
+        model=usage.model,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cached_input_tokens=usage.cached_input_tokens,
+        latency_ms=usage.latency_ms,
+        success=usage.success,
+        error=usage.error,
+    )
+    session.add(row)
+    session.flush()
+    return row

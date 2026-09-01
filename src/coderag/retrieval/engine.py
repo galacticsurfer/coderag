@@ -82,6 +82,8 @@ class RetrievalEngine:
         fused = fused[: self.settings.max_candidates]
 
         candidates = self._load_candidates(session, repository_id, fused)
+        # deterministic order BEFORE expansion so graph seeds are the true top-N
+        candidates.sort(key=lambda c: (-c.fused_score, c.symbol_id))
 
         # Phase 4: bounded one-hop graph expansion (added candidates with graph reasons).
         if self.graph_expander is not None and self.settings.graph_enabled:
@@ -89,7 +91,7 @@ class RetrievalEngine:
                 session, repository_id, candidates, query
             )
 
-        candidates.sort(key=lambda c: c.fused_score, reverse=True)
+        candidates.sort(key=lambda c: (-c.fused_score, c.symbol_id))
         if top_n is not None:
             candidates = candidates[:top_n]
         latency_ms = (time.perf_counter() - started) * 1000
