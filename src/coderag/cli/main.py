@@ -138,6 +138,78 @@ def ask(
             )
 
 
+@app.command()
+def eval(
+    dataset: str | None = typer.Option(None, "--dataset", help="Path to eval JSON."),
+    repo: str | None = typer.Option(None, "--repo"),
+    semantic: bool = typer.Option(True, "--semantic/--no-semantic"),
+    graph: bool = typer.Option(True, "--graph/--no-graph"),
+) -> None:
+    """Evaluate retrieval quality: Recall@K, MRR, and token metrics."""
+    from coderag.evaluation.datasets import DEMO_DATASET, load_dataset
+    from coderag.evaluation.harness import evaluate_retrieval, persist_eval_run
+
+    ds = dataset or DEMO_DATASET
+    cases = load_dataset(ds)
+    with session_scope() as session:
+        from coderag.service import resolve_repository
+
+        repo_obj = resolve_repository(session, repo)
+        m = evaluate_retrieval(session, repo_obj, cases, semantic=semantic, graph=graph)
+        persist_eval_run(session, name=f"eval:{repo_obj.name}", dataset=ds, metrics=m)
+
+    table = Table(title=f"Retrieval eval — {repo_obj.name} ({m.n_cases} cases)")
+    table.add_column("metric")
+    table.add_column("value", justify="right")
+    for k in sorted(m.recall_at):
+        table.add_row(f"Recall@{k}", f"{m.recall_at[k]:.3f}")
+    table.add_row("MRR", f"{m.mrr:.3f}")
+    table.add_row("avg retrieved tokens", f"{m.avg_candidate_tokens:.0f}")
+    table.add_row("avg context tokens", f"{m.avg_context_tokens:.0f}")
+    table.add_row("avg retrieval latency (ms)", f"{m.avg_retrieval_latency_ms:.2f}")
+    console.print(table)
+
+
+@app.command()
+def benchmark(
+    dataset: str | None = typer.Option(None, "--dataset"),
+    repo: str | None = typer.Option(None, "--repo"),
+    compare_baseline: bool = typer.Option(False, "--compare-baseline",
+                                          help="Compare naive full-file baseline vs Code-RAG."),
+) -> None:
+    """Benchmark search latency (and optionally token savings vs a naive baseline)."""
+    from coderag.evaluation.datasets import DEMO_DATASET, load_dataset
+    from coderag.evaluation.harness import benchmark_latency
+    from coderag.evaluation.harness import compare_baseline as _compare
+
+    ds = dataset or DEMO_DATASET
+    cases = load_dataset(ds)
+    with session_scope() as session:
+        from coderag.service import resolve_repository
+
+        repo_obj = resolve_repository(session, repo)
+        lat = benchmark_latency(session, repo_obj, cases)
+        console.print(
+            f"[bold]search latency[/] over {lat.n} runs: "
+            f"p50 {lat.p50_ms:.2f}ms · p95 {lat.p95_ms:.2f}ms · mean {lat.mean_ms:.2f}ms"
+        )
+        if compare_baseline:
+            cmp = _compare(session, repo_obj, cases)
+            table = Table(title="Baseline vs Code-RAG (input tokens)")
+            table.add_column("metric")
+            table.add_column("tokens", justify="right")
+            table.add_row("whole-repository baseline", f"{cmp.avg_baseline_tokens:.0f}")
+            table.add_row("naive top-3 whole files", f"{cmp.avg_topfiles_tokens:.0f}")
+            table.add_row("Code-RAG context tokens", f"{cmp.avg_rag_context_tokens:.0f}")
+            table.add_row("Code-RAG full prompt tokens", f"{cmp.avg_rag_prompt_tokens:.0f}")
+            console.print(table)
+            console.print(
+                f"[green]token reduction vs whole-repository baseline: "
+                f"{cmp.token_reduction_percent}%[/]  "
+                f"[dim](savings grow with repo size)[/]"
+            )
+
+
 def _print_candidates(repo_name: str, outcome) -> None:
     table = Table(title=f"Results in '{repo_name}'  ({outcome.latency_ms:.1f} ms)")
     table.add_column("#", justify="right", style="dim")

@@ -1,0 +1,37 @@
+[
+  {
+    "question": "Where is retry logic for failed payments implemented?",
+    "expected_symbols": ["payments.payment_service.PaymentService.retry_payment"]
+  },
+  {
+    "question": "Where is the retry timeout calculated?",
+    "expected_symbols": ["payments.retry_policy.RetryPolicy.calculate_timeout"]
+  },
+  {
+    "question": "Where is authentication for the payment endpoint implemented?",
+    "expected_symbols": ["payments.auth.authenticate"]
+  },
+  {
+    "question": "Which tests cover PaymentService.process_payment?",
+    "expected_symbols": [
+      "payments.tests.test_payment_service.test_process_payment_marks_invoice_paid",
+      "tests.test_payment_service.test_process_payment_marks_invoice_paid"
+    ]
+  },
+  {
+    "question": "Where are payments persisted to the database?",
+    "expected_symbols": ["payments.payment_repository.PaymentRepository.save"]
+  },
+  {
+    "question": "What code handles a checkout failure?",
+    "expected_symbols": ["payments.checkout_service.CheckoutService.handle_failure"]
+  },
+  {
+    "question": "Where is the payment retry limit defined?",
+    "expected_symbols": ["payments.retry_policy", "payments.retry_policy.RetryPolicy"]
+  },
+  {
+    "question": "How is a user saved?",
+    "expected_symbols": ["payments.users.UserRepository.save"]
+  }
+]
