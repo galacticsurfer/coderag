@@ -52,7 +52,7 @@ Full details: [`docs/architecture.md`](docs/architecture.md), plus ADRs in
 Homebrew, or `sudo`:
 
 ```bash
-pipx install "code-rag[mcp,localdb]"
+pipx install "coderag-ai[mcp,localdb]"
 coderag localdb start            # starts Postgres + applies migrations, prints the URL
 export CODERAG_DATABASE_URL='…'  # the URL it prints
 coderag index /path/to/your-project --name myproject
@@ -65,16 +65,16 @@ Other install forms:
 
 ```bash
 # from PyPI
-pip install code-rag
+pip install coderag-ai
 # with local semantic embeddings (pulls torch, ~2GB)
-pip install "code-rag[embeddings]"
+pip install "coderag-ai[embeddings]"
 # straight from git (no PyPI needed)
-pipx install "code-rag[mcp,localdb] @ git+https://github.com/galacticsurfer/coderag"
+pipx install "coderag-ai[mcp,localdb] @ git+https://github.com/galacticsurfer/coderag"
 # or clone + editable
 git clone https://github.com/galacticsurfer/coderag && cd coderag && pip install -e ".[dev]"
 ```
 
-> **Distribution name is `code-rag`** (plain `coderag` was taken on PyPI by an unrelated
+> **Distribution name is `coderag-ai`** (plain `coderag` was taken on PyPI by an unrelated
 > project). The CLI command, the MCP binary, and the import name are all still `coderag`.
 
 This installs the `coderag` CLI and the `coderag.api.app` FastAPI app. Extras: `embeddings`
@@ -166,7 +166,7 @@ subclassing for AWS Bedrock — needs no changes to the retrieval layer
 
 ```
 CODERAG_EMBEDDING_PROVIDER=hashing            # offline default (deterministic)
-# or, for genuine semantics (installs torch): pip install 'code-rag[embeddings]'
+# or, for genuine semantics (installs torch): pip install 'coderag-ai[embeddings]'
 CODERAG_EMBEDDING_PROVIDER=sentence_transformer
 CODERAG_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
 ```
@@ -275,7 +275,7 @@ Claude Code reads whole files to build context. Register CodeRAG as an **MCP ser
 call `coderag_context` / `coderag_search` instead — getting only the budgeted, relevant symbols:
 
 ```bash
-pipx install "code-rag[mcp]"
+pipx install "coderag-ai[mcp]"
 claude mcp add coderag \
   --env CODERAG_DATABASE_URL=postgresql+psycopg://coderag:coderag@localhost:5432/coderag \
   --env CODERAG_DEFAULT_REPOSITORY=myrepo -- coderag-mcp

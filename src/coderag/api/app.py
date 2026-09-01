@@ -15,6 +15,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from coderag import __version__ as _coderag_version
 from coderag.api import schemas as s
 from coderag.db.models import (
     IndexingRun,
@@ -34,7 +35,7 @@ from coderag.service import (
     run_search,
 )
 
-app = FastAPI(title="CodeRAG", version="0.1.0")
+app = FastAPI(title="CodeRAG", version=_coderag_version)
 
 
 def get_session() -> Iterator[Session]:

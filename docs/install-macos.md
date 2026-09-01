@@ -24,7 +24,7 @@ Open a new terminal afterwards so your `PATH` updates.
 ### 2. Install CodeRAG
 
 ```bash
-pipx install "code-rag[mcp,localdb]"
+pipx install "coderag-ai[mcp,localdb]"
 ```
 
 Check:
@@ -111,7 +111,7 @@ want semantic (rather than lexical) matching.
 
 ```bash
 coderag localdb stop
-pipx uninstall code-rag
+pipx uninstall coderag-ai
 rm -rf ~/.coderag        # database files
 ```
 

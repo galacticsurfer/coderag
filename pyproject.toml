@@ -3,9 +3,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-# Distribution name on PyPI ("pipx install code-rag"); the import name and the CLI
-# command are both `coderag`. ("coderag" was already taken on PyPI by another project.)
-name = "code-rag"
+# Distribution name on PyPI ("pipx install coderag-ai"); the import name and the CLI
+# command are both `coderag`. Plain "coderag" is taken on PyPI by an unrelated project,
+# and "code-rag" is rejected as too similar (PyPI collapses -/_/. when comparing names).
+name = "coderag-ai"
 version = "0.3.0"
 description = "Token-efficient, structure-aware Code Intelligence + RAG for private source repositories."
 readme = "README.md"
