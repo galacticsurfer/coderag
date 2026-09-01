@@ -20,6 +20,14 @@ CLASS = "class"
 FUNCTION = "function"
 METHOD = "method"
 
+# Relationship types (lightweight code graph).
+CONTAINS = "CONTAINS"
+CALLS = "CALLS"
+IMPORTS = "IMPORTS"
+INHERITS = "INHERITS"
+REFERENCES = "REFERENCES"
+TESTS = "TESTS"
+
 
 @dataclass
 class ParsedSymbol:

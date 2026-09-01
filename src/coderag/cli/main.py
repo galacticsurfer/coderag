@@ -39,6 +39,7 @@ def index(
             f"[green]Indexed[/] [bold]{repo.name}[/] @ {stats.commit_sha or 'no-commit'}: "
             f"{stats.files_indexed} files, {stats.symbols_indexed} symbols, "
             f"{stats.embeddings_created} embeddings, "
+            f"{stats.relationships_created} relationships, "
             f"{stats.files_skipped} skipped, {stats.secrets_redacted} redactions "
             f"in {stats.duration_seconds:.2f}s"
         )
@@ -51,8 +52,8 @@ def search(
     limit: int = typer.Option(10, "--limit", "-n"),
     semantic: bool = typer.Option(True, "--semantic/--no-semantic",
                                   help="Include semantic (vector) retrieval."),
-    graph: bool = typer.Option(False, "--graph/--no-graph",
-                               help="Include one-hop dependency expansion (Phase 4)."),
+    graph: bool = typer.Option(True, "--graph/--no-graph",
+                               help="Include one-hop dependency expansion."),
 ) -> None:
     """Retrieve ranked symbols (no LLM required)."""
     settings = get_settings()

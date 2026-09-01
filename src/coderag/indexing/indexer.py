@@ -18,9 +18,16 @@ from sqlalchemy.orm import Session
 from coderag.core.config import Settings, get_settings
 from coderag.core.logging import get_logger
 from coderag.core.tokens import TokenCounter, get_token_counter
-from coderag.db.models import IndexingRun, Repository, SourceFile, Symbol
+from coderag.db.models import (
+    IndexingRun,
+    Repository,
+    SourceFile,
+    Symbol,
+    SymbolRelationship,
+)
 from coderag.git.repo import GitRepo
 from coderag.indexing.ignore import should_index
+from coderag.parsing.base import CALLS, CONTAINS, TESTS
 from coderag.parsing.registry import get_parser_for_path, module_qualified_name
 from coderag.security.secrets import redact
 
@@ -34,6 +41,7 @@ class IndexStats:
     files_skipped: int = 0
     secrets_redacted: int = 0
     embeddings_created: int = 0
+    relationships_created: int = 0
     duration_seconds: float = 0.0
     commit_sha: str | None = None
 
@@ -91,6 +99,10 @@ class Indexer:
         )
         self.session.execute(delete(Symbol).where(Symbol.repository_id == repo.id))
 
+        # accumulate cross-file graph edges, resolved after all symbols exist
+        self._pending_contains: list[tuple[int, int]] = []
+        self._pending_rels: list[tuple[int, str, str, float, dict | None]] = []
+
         stats = IndexStats(commit_sha=commit)
         try:
             for rel_path in git.list_files():
@@ -98,6 +110,8 @@ class Indexer:
                     stats.files_skipped += 1
                     continue
                 self._index_file(repo, rel_path, commit, git, stats)
+
+            stats.relationships_created = self._persist_relationships(repo)
 
             if self.embed:
                 stats.embeddings_created = self._embed(repo)
@@ -125,6 +139,76 @@ class Indexer:
             log.error("full_index.failed", repository=repo.name, error=str(exc)[:200])
             raise
         return run, stats
+
+    # -- relationships ----------------------------------------------------
+    def _persist_relationships(self, repo: Repository) -> int:
+        rows = self.session.execute(
+            select(
+                Symbol.id, Symbol.symbol_name, Symbol.qualified_name,
+                Symbol.parent_symbol_id, Symbol.file_path,
+            ).where(Symbol.repository_id == repo.id)
+        ).all()
+        by_qual: dict[str, int] = {}
+        by_name: dict[str, list[int]] = {}
+        info: dict[int, tuple[int | None, str, str]] = {}
+        for sid, name, qual, parent_id, path in rows:
+            by_qual[qual.lower()] = sid
+            by_name.setdefault(name.lower(), []).append(sid)
+            info[sid] = (parent_id, name, path)
+
+        def resolve(target_name: str, via: str | None, source_id: int) -> int | None:
+            t = target_name.lower()
+            if t in by_qual:
+                return by_qual[t]
+            cands = by_name.get(t.split(".")[-1], [])
+            if not cands:
+                return None
+            if via == "self":
+                parent = info[source_id][0]
+                same = [c for c in cands if info[c][0] == parent]
+                if len(same) == 1:
+                    return same[0]
+            return cands[0] if len(cands) == 1 else None
+
+        def is_test(sid: int) -> bool:
+            _parent, name, path = info[sid]
+            p = path.replace("\\", "/")
+            return (
+                name.lower().startswith("test")
+                or "/tests/" in p
+                or p.startswith("tests/")
+                or p.rsplit("/", 1)[-1].startswith("test_")
+            )
+
+        edges: dict[tuple[int, int | None, str], tuple[float, dict | None]] = {}
+
+        def add(source: int, target: int | None, rtype: str, conf: float, meta):
+            key = (source, target, rtype)
+            if key not in edges or conf > edges[key][0]:
+                edges[key] = (conf, meta)
+
+        for parent_db, child_db in self._pending_contains:
+            add(parent_db, child_db, CONTAINS, 1.0, None)
+
+        for src, rtype, target_name, conf, meta in self._pending_rels:
+            via = (meta or {}).get("via") if meta else None
+            tid = resolve(target_name, via, src)
+            if tid is None or tid == src:
+                continue  # keep the graph correct: only in-repo, non-self-loop edges
+            add(src, tid, rtype, conf, meta)
+            if rtype == CALLS and is_test(src):
+                add(src, tid, TESTS, min(conf, 0.8), None)
+
+        for (source, target, rtype), (conf, meta) in edges.items():
+            self.session.add(
+                SymbolRelationship(
+                    repository_id=repo.id, source_symbol_id=source,
+                    target_symbol_id=target, relationship_type=rtype,
+                    confidence=conf, meta=meta,
+                )
+            )
+        self.session.flush()
+        return len(edges)
 
     def _embed(self, repo: Repository) -> int:
         from coderag.embeddings.pipeline import EmbeddingPipeline
@@ -192,7 +276,16 @@ class Indexer:
             self.session.add(sym)
             self.session.flush()
             local_to_db[ps.local_id] = sym.id
+            if parent_db is not None:
+                self._pending_contains.append((parent_db, sym.id))
             stats.symbols_indexed += 1
+
+        for pr in result.relationships:
+            src_db = local_to_db.get(pr.source_local_id)
+            if src_db is not None:
+                self._pending_rels.append(
+                    (src_db, pr.relationship_type, pr.target_name, pr.confidence, pr.metadata)
+                )
         stats.files_indexed += 1
 
 

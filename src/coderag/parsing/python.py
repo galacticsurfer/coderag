@@ -13,11 +13,15 @@ from tree_sitter import Language, Parser
 
 from coderag.core.text import build_search_terms, extract_identifiers, split_identifier
 from coderag.parsing.base import (
+    CALLS,
     CLASS,
     FUNCTION,
+    IMPORTS,
+    INHERITS,
     METHOD,
     MODULE,
     LanguageParser,
+    ParsedRelationship,
     ParsedSymbol,
     ParseResult,
 )
@@ -39,6 +43,7 @@ class PythonParser(LanguageParser):
         tree = self._parser.parse(src)
         root = tree.root_node
         symbols: list[ParsedSymbol] = []
+        relationships: list[ParsedRelationship] = []
         counter = _Counter()
 
         def text(node) -> str:
@@ -66,6 +71,13 @@ class PythonParser(LanguageParser):
             ),
         )
         symbols.append(module_sym)
+
+        # -- module imports --------------------------------------------------
+        for node in header_nodes:
+            for target in _imports(node, src):
+                relationships.append(
+                    ParsedRelationship(module_sym.local_id, IMPORTS, target, confidence=0.9)
+                )
 
         # -- recurse into definitions ----------------------------------------
         def emit(node, parent_local_id: int, qual_prefix: str, enclosing_is_class: bool):
@@ -99,6 +111,22 @@ class PythonParser(LanguageParser):
                 ),
             )
             symbols.append(sym)
+
+            if is_class:
+                for base in _bases(inner, src):
+                    relationships.append(
+                        ParsedRelationship(sym.local_id, INHERITS, base, confidence=0.9)
+                    )
+            elif body is not None:
+                for target, via in _calls(body, src):
+                    relationships.append(
+                        ParsedRelationship(
+                            sym.local_id, CALLS, target,
+                            confidence=0.9 if via == "self" else 0.6,
+                            metadata={"via": via},
+                        )
+                    )
+
             if body is not None:
                 for child in body.named_children:
                     if child.type in _DEF_TYPES:
@@ -108,8 +136,7 @@ class PythonParser(LanguageParser):
             if child.type in _DEF_TYPES:
                 emit(child, module_sym.local_id, module_qualified_name, enclosing_is_class=False)
 
-        # Relationships are extracted in Phase 4 (scheduled); none yet.
-        return ParseResult(symbols=symbols, relationships=[])
+        return ParseResult(symbols=symbols, relationships=relationships)
 
 
 class _Counter:
@@ -148,6 +175,108 @@ def _docstring_of(scope_node, src: bytes) -> str | None:
                 return _clean_docstring(raw)
         # only the *first* statement can be a docstring
         break
+    return None
+
+
+def _node_text(node, src: bytes) -> str:
+    return src[node.start_byte : node.end_byte].decode("utf-8", "replace")
+
+
+def _imports(node, src: bytes) -> list[str]:
+    """Return imported dotted names from an import/import-from statement."""
+    out: list[str] = []
+    if node.type == "import_statement":
+        for child in node.named_children:
+            if child.type in ("dotted_name", "aliased_import"):
+                dn = child if child.type == "dotted_name" else child.child_by_field_name("name")
+                if dn is not None:
+                    out.append(_node_text(dn, src))
+    elif node.type == "import_from_statement":
+        mod_node = node.child_by_field_name("module_name")
+        # module_name field may not be set on older grammars; fall back to first dotted_name
+        module = None
+        if mod_node is not None:
+            module = _node_text(mod_node, src)
+        else:
+            for child in node.named_children:
+                if child.type in ("dotted_name", "relative_import"):
+                    module = _node_text(child, src)
+                    break
+        # imported names are the dotted_name/aliased_import nodes after the module
+        names: list[str] = []
+        seen_module = False
+        for child in node.named_children:
+            if not seen_module:
+                if module and _node_text(child, src) == module:
+                    seen_module = True
+                continue
+            if child.type == "dotted_name":
+                names.append(_node_text(child, src))
+            elif child.type == "aliased_import":
+                nm = child.child_by_field_name("name")
+                if nm is not None:
+                    names.append(_node_text(nm, src))
+            elif child.type == "wildcard_import":
+                pass
+        if names and module:
+            out.extend(f"{module}.{n}" for n in names)
+        elif module:
+            out.append(module)
+    return out
+
+
+def _bases(class_inner, src: bytes) -> list[str]:
+    sup = class_inner.child_by_field_name("superclasses")
+    if sup is None:
+        return []
+    bases: list[str] = []
+    for child in sup.named_children:
+        if child.type == "identifier":
+            bases.append(_node_text(child, src))
+        elif child.type == "attribute":
+            attr = child.child_by_field_name("attribute")
+            if attr is not None:
+                bases.append(_node_text(attr, src))
+    return bases
+
+
+def _calls(body, src: bytes) -> list[tuple[str, str]]:
+    """Collect (target_name, via) call targets within a body.
+
+    Does not descend into nested definitions (their calls belong to them).
+    ``via`` is "self" for self.method(), else "attr" or "bare".
+    """
+    out: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def visit(node):
+        for child in node.children:
+            if child.type in _DEF_TYPES:
+                continue  # nested symbol; handled separately
+            if child.type == "call":
+                fn = child.child_by_field_name("function")
+                hit = _call_target(fn, src)
+                if hit and hit not in seen:
+                    seen.add(hit)
+                    out.append(hit)
+            visit(child)
+
+    visit(body)
+    return out
+
+
+def _call_target(fn, src: bytes) -> tuple[str, str] | None:
+    if fn is None:
+        return None
+    if fn.type == "identifier":
+        return (_node_text(fn, src), "bare")
+    if fn.type == "attribute":
+        obj = fn.child_by_field_name("object")
+        attr = fn.child_by_field_name("attribute")
+        if attr is None:
+            return None
+        via = "self" if obj is not None and _node_text(obj, src) == "self" else "attr"
+        return (_node_text(attr, src), via)
     return None
 
 
