@@ -43,10 +43,12 @@ class RetrievalEngine:
         retrievers: list[Retriever],
         settings: Settings | None = None,
         graph_expander=None,
+        reranker=None,
     ) -> None:
         self.retrievers = retrievers
         self.settings = settings or get_settings()
         self.graph_expander = graph_expander  # set in Phase 4
+        self.reranker = reranker  # set in Phase 9 (optional)
 
     def _weights(self) -> dict[str, float]:
         s = self.settings
@@ -91,7 +93,10 @@ class RetrievalEngine:
                 session, repository_id, candidates, query
             )
 
-        candidates.sort(key=lambda c: (-c.fused_score, c.symbol_id))
+        if self.reranker is not None:
+            candidates = self.reranker.rerank(session, repository_id, query, candidates)
+        else:
+            candidates.sort(key=lambda c: (-c.fused_score, c.symbol_id))
         if top_n is not None:
             candidates = candidates[:top_n]
         latency_ms = (time.perf_counter() - started) * 1000
@@ -143,6 +148,7 @@ def build_engine(
     settings: Settings | None = None,
     embedding_provider=None,
     with_graph: bool = False,
+    with_reranker: bool = False,
 ) -> RetrievalEngine:
     """Construct an engine with the default retriever set.
 
@@ -160,4 +166,11 @@ def build_engine(
         from coderag.retrieval.graph import GraphExpander
 
         graph_expander = GraphExpander(settings)
-    return RetrievalEngine(retrievers, settings=settings, graph_expander=graph_expander)
+    reranker = None
+    if with_reranker or settings.reranker_enabled:
+        from coderag.retrieval.reranking import get_reranker
+
+        reranker = get_reranker(settings)
+    return RetrievalEngine(
+        retrievers, settings=settings, graph_expander=graph_expander, reranker=reranker
+    )

@@ -42,17 +42,24 @@ def resolve_repository(session: Session, name: str | None = None) -> Repository:
 
 def run_index(
     session: Session, path: str, name: str | None = None,
-    settings: Settings | None = None,
+    settings: Settings | None = None, incremental: bool = False,
 ) -> tuple[Repository, IndexStats]:
+    from coderag.indexing.indexer import Indexer, get_or_create_repository
+
     settings = settings or get_settings()
     p = Path(path).resolve()
     repo_name = name or p.name
-    repo, _run, stats = index_repository(session, repo_name, str(p), settings=settings)
+    if not incremental:
+        repo, _run, stats = index_repository(session, repo_name, str(p), settings=settings)
+        return repo, stats
+    repo = get_or_create_repository(session, repo_name, str(p))
+    _run, stats = Indexer(session, settings=settings).incremental_index(repo)
     return repo, stats
 
 
 def get_engine(
-    settings: Settings | None = None, *, semantic: bool = False, graph: bool = False
+    settings: Settings | None = None, *, semantic: bool = False, graph: bool = False,
+    rerank: bool = False,
 ) -> RetrievalEngine:
     settings = settings or get_settings()
     embedding_provider = None
@@ -60,17 +67,17 @@ def get_engine(
         from coderag.embeddings.registry import get_embedding_provider
 
         embedding_provider = get_embedding_provider(settings)
-    return build_engine(settings, embedding_provider, with_graph=graph)
+    return build_engine(settings, embedding_provider, with_graph=graph, with_reranker=rerank)
 
 
 def run_search(
     session: Session, query: str, repo_name: str | None = None, top_n: int = 10,
     settings: Settings | None = None, *, semantic: bool = False, graph: bool = False,
-    record: bool = False,
+    rerank: bool = False, record: bool = False,
 ) -> tuple[Repository, RetrievalOutcome]:
     settings = settings or get_settings()
     repo = resolve_repository(session, repo_name)
-    engine = get_engine(settings, semantic=semantic, graph=graph)
+    engine = get_engine(settings, semantic=semantic, graph=graph, rerank=rerank)
     outcome = engine.search(session, repo.id, query, top_n=top_n)
     if record:
         from coderag.telemetry import record_query

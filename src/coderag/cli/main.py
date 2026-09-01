@@ -29,12 +29,14 @@ def _main(verbose: bool = typer.Option(False, "--verbose", "-v")) -> None:
 def index(
     path: str = typer.Argument(..., help="Path to the repository to index."),
     name: str | None = typer.Option(None, "--name", help="Repository name (default: dir name)."),
+    incremental: bool = typer.Option(False, "--incremental",
+                                     help="Only reindex what changed since the last commit."),
 ) -> None:
-    """Full-index a repository into PostgreSQL."""
+    """Index a repository into PostgreSQL (full, or --incremental)."""
     with session_scope() as session:
         from coderag.service import run_index
 
-        repo, stats = run_index(session, path, name)
+        repo, stats = run_index(session, path, name, incremental=incremental)
         console.print(
             f"[green]Indexed[/] [bold]{repo.name}[/] @ {stats.commit_sha or 'no-commit'}: "
             f"{stats.files_indexed} files, {stats.symbols_indexed} symbols, "
@@ -144,6 +146,7 @@ def eval(
     repo: str | None = typer.Option(None, "--repo"),
     semantic: bool = typer.Option(True, "--semantic/--no-semantic"),
     graph: bool = typer.Option(True, "--graph/--no-graph"),
+    rerank: bool = typer.Option(False, "--rerank", help="Apply the optional reranker."),
 ) -> None:
     """Evaluate retrieval quality: Recall@K, MRR, and token metrics."""
     from coderag.evaluation.datasets import DEMO_DATASET, load_dataset
@@ -155,7 +158,8 @@ def eval(
         from coderag.service import resolve_repository
 
         repo_obj = resolve_repository(session, repo)
-        m = evaluate_retrieval(session, repo_obj, cases, semantic=semantic, graph=graph)
+        m = evaluate_retrieval(session, repo_obj, cases, semantic=semantic, graph=graph,
+                               rerank=rerank)
         persist_eval_run(session, name=f"eval:{repo_obj.name}", dataset=ds, metrics=m)
 
     table = Table(title=f"Retrieval eval — {repo_obj.name} ({m.n_cases} cases)")
@@ -208,6 +212,47 @@ def benchmark(
                 f"{cmp.token_reduction_percent}%[/]  "
                 f"[dim](savings grow with repo size)[/]"
             )
+
+
+@app.command()
+def analyze(
+    repo: str | None = typer.Option(None, "--repo"),
+    tool: str = typer.Option("flake8", "--tool", help="flake8 or pylint"),
+    fix: bool = typer.Option(False, "--fix", help="Propose LLM patches (needs a provider)."),
+    limit: int = typer.Option(20, "--limit"),
+) -> None:
+    """Run a static analyzer, map findings to symbols, and build fix context."""
+    from coderag.analyzers.flake8_adapter import Flake8Analyzer
+    from coderag.analyzers.pylint_adapter import PylintAnalyzer
+    from coderag.analyzers.workflow import build_fix_context, map_finding_to_symbol
+
+    analyzer = PylintAnalyzer() if tool == "pylint" else Flake8Analyzer()
+    if not analyzer.available():
+        console.print(f"[red]{tool} is not installed[/] (pip install 'coderag[analyzers]')")
+        raise typer.Exit(1)
+
+    with session_scope() as session:
+        from coderag.service import resolve_repository
+
+        repo_obj = resolve_repository(session, repo)
+        findings = analyzer.analyze(repo_obj.local_path)[:limit]
+        table = Table(title=f"{tool} findings — {repo_obj.name}")
+        table.add_column("finding")
+        table.add_column("symbol", style="cyan")
+        fixes = []
+        for f in findings:
+            sym = map_finding_to_symbol(session, repo_obj.id, f)
+            table.add_row(f.describe(), sym.qualified_name if sym else "-")
+            if fix:
+                fixes.append(build_fix_context(session, repo_obj, f))
+        console.print(table)
+        if fix and fixes:
+            from coderag.analyzers.workflow import run_fix_loop
+            from coderag.llm.registry import get_llm_provider
+
+            proposals = run_fix_loop(fixes, get_llm_provider(get_settings()))
+            for p in proposals:
+                console.print(f"\n[bold]{p['finding']}[/] → {p['symbol']}\n{p['patch']}")
 
 
 def _print_candidates(repo_name: str, outcome) -> None:

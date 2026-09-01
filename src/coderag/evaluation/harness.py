@@ -55,12 +55,14 @@ def evaluate_retrieval(
     *,
     semantic: bool = True,
     graph: bool = True,
+    rerank: bool = False,
 ) -> RetrievalMetrics:
     settings = settings or get_settings()
     engine = build_engine(
         settings,
         embedding_provider=_provider(settings) if semantic else None,
         with_graph=graph,
+        with_reranker=rerank,
     )
     builder = ContextBuilder(session, settings=settings)
 

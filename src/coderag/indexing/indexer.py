@@ -12,7 +12,7 @@ import hashlib
 import time
 from dataclasses import dataclass
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from coderag.core.config import Settings, get_settings
@@ -37,7 +37,9 @@ log = get_logger("indexer")
 @dataclass
 class IndexStats:
     files_indexed: int = 0
+    files_deleted: int = 0
     symbols_indexed: int = 0
+    symbols_deleted: int = 0
     files_skipped: int = 0
     secrets_redacted: int = 0
     embeddings_created: int = 0
@@ -122,7 +124,6 @@ class Indexer:
             run.symbols_indexed = stats.symbols_indexed
             run.embeddings_created = stats.embeddings_created
             run.duration_seconds = stats.duration_seconds
-            from sqlalchemy import func
 
             run.finished_at = func.now()
             repo.indexed_commit_sha = commit
@@ -139,6 +140,149 @@ class Indexer:
             log.error("full_index.failed", repository=repo.name, error=str(exc)[:200])
             raise
         return run, stats
+
+    # -- incremental index ------------------------------------------------
+    def incremental_index(self, repo: Repository) -> tuple[IndexingRun, IndexStats]:
+        """Update only what changed since ``repo.indexed_commit_sha``.
+
+        Symbols/embeddings for unchanged files are preserved (unchanged code is
+        never re-embedded). The relationship graph is rebuilt from a fast parse
+        pass so cross-file edges stay correct. Falls back to a full index when
+        there is no prior commit or the path is not a git repo.
+        """
+        git = GitRepo(repo.local_path)
+        base = repo.indexed_commit_sha
+        head = git.current_commit()
+        if not git.is_git() or not base:
+            return self.full_index(repo)
+
+        started = time.perf_counter()
+        run = IndexingRun(repository_id=repo.id, mode="incremental", status="running",
+                          from_commit=base, to_commit=head)
+        self.session.add(run)
+        self.session.flush()
+
+        self._pending_contains = []
+        self._pending_rels = []
+        stats = IndexStats(commit_sha=head)
+        try:
+            diff = git.diff(base, head or "HEAD")
+            changed = [p for p in diff.changed if should_index(p, self.extra_ignore)]
+            gone = set(changed) | set(diff.deleted)
+            for path in gone:
+                self._delete_file(repo, path, stats)
+
+            for path in changed:
+                self._index_file(repo, path, head, git, stats)
+
+            # rebuild the whole-repo graph: collect edges from unchanged files too
+            qual_to_id = self._qualified_index(repo)
+            changed_set = set(changed)
+            for path in self._indexed_paths(repo):
+                if path not in changed_set:
+                    self._collect_edges(repo, path, git, qual_to_id)
+            self.session.execute(
+                delete(SymbolRelationship).where(
+                    SymbolRelationship.repository_id == repo.id
+                )
+            )
+            stats.relationships_created = self._persist_relationships(repo)
+
+            if self.embed:
+                stats.embeddings_created = self._embed(repo)
+
+            stats.duration_seconds = time.perf_counter() - started
+
+            run.status = "success"
+            run.files_indexed = stats.files_indexed
+            run.files_deleted = stats.files_deleted
+            run.symbols_indexed = stats.symbols_indexed
+            run.symbols_deleted = stats.symbols_deleted
+            run.embeddings_created = stats.embeddings_created
+            run.duration_seconds = stats.duration_seconds
+            run.finished_at = func.now()
+            repo.indexed_commit_sha = head
+            repo.updated_at = func.now()
+            log.info(
+                "incremental_index.done", repository=repo.name,
+                changed=len(changed), deleted=len(diff.deleted),
+                symbols_added=stats.symbols_indexed, symbols_deleted=stats.symbols_deleted,
+                embedded=stats.embeddings_created, seconds=round(stats.duration_seconds, 3),
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            run.status = "failed"
+            run.error = str(exc)[:500]
+            log.error("incremental_index.failed", repository=repo.name, error=str(exc)[:200])
+            raise
+        return run, stats
+
+    def _delete_file(self, repo: Repository, path: str, stats: IndexStats) -> None:
+        n = self.session.scalar(
+            select(func.count()).select_from(Symbol).where(
+                Symbol.repository_id == repo.id, Symbol.file_path == path
+            )
+        ) or 0
+        existed = self.session.scalar(
+            select(SourceFile.id).where(
+                SourceFile.repository_id == repo.id, SourceFile.path == path
+            )
+        ) is not None
+        self.session.execute(
+            delete(Symbol).where(Symbol.repository_id == repo.id, Symbol.file_path == path)
+        )
+        self.session.execute(
+            delete(SourceFile).where(
+                SourceFile.repository_id == repo.id, SourceFile.path == path
+            )
+        )
+        if existed:
+            stats.files_deleted += 1
+        stats.symbols_deleted += int(n)
+
+    def _qualified_index(self, repo: Repository) -> dict[str, int]:
+        return {
+            qual: sid
+            for sid, qual in self.session.execute(
+                select(Symbol.id, Symbol.qualified_name).where(
+                    Symbol.repository_id == repo.id
+                )
+            ).all()
+        }
+
+    def _indexed_paths(self, repo: Repository) -> list[str]:
+        return list(
+            self.session.scalars(
+                select(SourceFile.path).where(SourceFile.repository_id == repo.id)
+            )
+        )
+
+    def _collect_edges(
+        self, repo: Repository, path: str, git: GitRepo, qual_to_id: dict[str, int]
+    ) -> None:
+        """Parse an unchanged file for its edges only, mapping to existing ids."""
+        raw = git.read_text(path)
+        parser = get_parser_for_path(path)
+        if raw is None or parser is None:
+            return
+        result = parser.parse(module_qualified_name(path), redact(raw).text)
+        local_to_db = {
+            ps.local_id: qual_to_id.get(ps.qualified_name) for ps in result.symbols
+        }
+        for ps in result.symbols:
+            db_id = local_to_db.get(ps.local_id)
+            if db_id is None:
+                continue
+            if ps.parent_local_id is not None:
+                parent_db = local_to_db.get(ps.parent_local_id)
+                if parent_db is not None:
+                    self._pending_contains.append((parent_db, db_id))
+        for pr in result.relationships:
+            src_db = local_to_db.get(pr.source_local_id)
+            if src_db is not None:
+                self._pending_rels.append(
+                    (src_db, pr.relationship_type, pr.target_name, pr.confidence,
+                     pr.metadata)
+                )
 
     # -- relationships ----------------------------------------------------
     def _persist_relationships(self, repo: Repository) -> int:

@@ -42,6 +42,7 @@ class Candidate:
     source_ranks: dict[str, int] = field(default_factory=dict)
     source_scores: dict[str, float] = field(default_factory=dict)
     fused_score: float = 0.0
+    rerank_score: float | None = None  # set when a reranker runs (Phase 9)
     # Populated lazily by the context builder when code is actually needed.
     signature: str | None = None
     docstring: str | None = None
