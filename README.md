@@ -3,34 +3,175 @@
 **Token-efficient, structure-aware Code Intelligence + RAG for private source repositories.**
 
 CodeRAG indexes private source-code repositories, retrieves *only the code relevant* to a
-developer's request, builds a token-budgeted context package, and sends it to your
+developer's request, builds a **token-budgeted** context package, and sends it to your
 organisation's Claude endpoint (or any LLM behind the `LLMProvider` interface).
 
 > **Primary objective:** reduce LLM input-token consumption **without** reducing answer
-> quality — and *prove it with measurements*.
+> quality — and *prove it with measurements*, never claims.
 
-This is not a generic document-RAG app: chunks are functions/methods/classes/modules
-(via Tree-sitter), retrieval is hybrid (exact-symbol + Postgres full-text + pgvector
-semantic + a lightweight code graph), and every result explains *why* it was retrieved.
+This is **not** a generic document-RAG app:
 
-See [`docs/`](docs/) for the architecture, retrieval design, security model, and evaluation
-methodology. A detailed quick-start lands as the phases complete; the short version:
+- **Chunks are code constructs** — functions/methods/classes/modules — via Tree-sitter, never
+  fixed-size text slices.
+- **Retrieval is hybrid**: exact-symbol + PostgreSQL full-text (lexical) + pgvector (semantic)
+  + a lightweight one-hop code graph, fused with Reciprocal Rank Fusion.
+- **Every result explains *why*** it was retrieved (`exact_symbol`, `lexical`, `semantic`,
+  `graph_caller`, `graph_test`, …).
+- **Embeddings run locally** by default — no source code leaves your infrastructure.
+- **Retrieval works with no LLM.** Only `ask` needs a provider.
+
+## What problem this solves
+
+Instead of pasting whole files (or a whole repo) into a prompt, CodeRAG retrieves the smallest
+useful set of symbols for a task and packs them under a hard token budget, deduplicating
+overlapping code and dropping low-priority symbols before anything is sent externally. Token
+consumption is measured end-to-end and comparable against a naive baseline.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  G[Git repo] --> IDX[Indexer]
+  IDX --> TS[Tree-sitter parse] --> SX[Symbols + graph]
+  SX --> PG[(PostgreSQL + pgvector)]
+  EMB[Local embeddings] --> PG
+  Q[Query] --> SYM[symbol] & LEX[full-text] & SEM[vector]
+  PG --- SYM & LEX & SEM
+  SYM & LEX & SEM --> RRF[RRF fusion] --> EXP[1-hop graph expand]
+  EXP --> RR[reranker*] --> CB[Context builder + token budget] --> LLM[LLMProvider] --> C[Claude]
+```
+
+Full details: [`docs/architecture.md`](docs/architecture.md), plus ADRs in
+[`docs/adr/`](docs/adr/) and topic docs for [retrieval](docs/retrieval.md),
+[security](docs/security.md), [evaluation](docs/evaluation.md),
+[LLM providers](docs/llm-providers.md), and [adding a language](docs/adding-language.md).
+
+## Quick start
 
 ```bash
 cp .env.example .env
-docker compose up -d           # PostgreSQL + pgvector
-make install
-make migrate
+docker compose up -d          # PostgreSQL + pgvector
+make install                  # venv + deps (dev extras include a rootless test Postgres)
+make migrate                  # alembic upgrade head
+
 coderag index ./examples/demo-repository
-coderag search "where are failed payments retried?"     # no LLM needed
+coderag search "where are failed payments retried?"                 # no LLM needed
 coderag context "why can payment retry leave an invoice pending?"   # no LLM needed
-coderag ask "why can payment retry leave an invoice pending?"       # needs an LLM
+coderag eval                                                        # Recall@K, MRR, tokens
+coderag benchmark --compare-baseline                                # measured token savings
+# configure a provider (below), then:
+coderag ask "why can payment retry leave an invoice pending?"
 ```
 
-Retrieval (`search`, `context`) works **without any LLM credentials**. Only `ask` needs a
-provider. Embeddings run **locally** by default (no source code leaves your infra).
+Everything except `ask` runs **without any LLM credentials**.
 
-## Status
+## Indexing
 
-Built incrementally, phase by phase, with tests at every step. See `docs/` and the ADRs in
-`docs/adr/`. Licensed under Apache-2.0.
+```bash
+coderag index /path/to/repo --name myrepo     # full index
+coderag index /path/to/repo --incremental     # only reindex what changed since last commit
+```
+
+Respects `.gitignore`; skips vendored/generated/binary files and secret files (`.env`,
+`*.pem`, keys, …); redacts residual secret-shaped strings; never indexes credentials.
+Incremental indexing preserves embeddings for unchanged code.
+
+## Searching & context
+
+```bash
+coderag search "retry failed payment" --repo myrepo --limit 10
+coderag context "why pending?" --show-prompt          # exact prompt + token accounting
+```
+
+`coderag context` prints the selected symbols by priority (target → dependencies → callers →
+tests → semantic → additional), the token accounting, and (optionally) the full prompt — so
+you can debug token usage without calling the model.
+
+## Claude configuration
+
+Set in `.env` (never commit credentials):
+
+```
+CODERAG_LLM_PROVIDER=anthropic
+CODERAG_ANTHROPIC_API_KEY=sk-...
+CODERAG_ANTHROPIC_BASE_URL=https://api.anthropic.com   # or your internal proxy
+CODERAG_ANTHROPIC_MODEL=claude-sonnet-5
+```
+
+The provider talks to the Messages API over HTTP, so pointing it at an internal proxy — or
+subclassing for AWS Bedrock — needs no changes to the retrieval layer
+([`docs/llm-providers.md`](docs/llm-providers.md)).
+
+## Embedding configuration
+
+```
+CODERAG_EMBEDDING_PROVIDER=hashing            # offline default (deterministic)
+# or, for genuine semantics (installs torch): pip install 'coderag[embeddings]'
+CODERAG_EMBEDDING_PROVIDER=sentence_transformer
+CODERAG_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+```
+
+The default `hashing` embedder is offline and deterministic (great for CI/air-gapped dev);
+similarity reflects shared vocabulary. Switch to the local SentenceTransformers model for true
+semantic matching — code still never leaves your infra.
+
+## Evaluation & token measurement
+
+```bash
+coderag eval --dataset examples/eval/eval_dataset.json
+coderag benchmark --compare-baseline
+```
+
+On the bundled demo (offline `hashing` embedder), measured:
+
+| metric | value |
+|--------|-------|
+| Recall@1 / @3 / @5 / @10 | 0.375 / 0.625 / 0.875 / **1.000** |
+| MRR | 0.574 |
+| search latency p50 / p95 | ~6 ms / ~9 ms |
+| context reduction vs whole-repo baseline | ~13% |
+
+**On token savings, honestly:** the demo repo is tiny (~1.9k tokens total), so whole-repo
+reduction is modest. Savings scale with repository size — on a real codebase you send a few
+thousand budgeted tokens instead of the whole repo. The point is that it's **measured**
+(`coderag benchmark`), never asserted. Recall@1 is limited by the offline hashing embedder;
+the local SentenceTransformers model improves ranking.
+
+## Security model
+
+Source code is treated as sensitive: secrets are never indexed, credentials are redacted, full
+source/prompts are never logged, every retrieval query is scoped by `repository_id` (cross-repo
+isolation is a test, not a hope), and an `AuthorizationProvider` interface gates repository
+access. Retrieved code is delimited as untrusted **data** in the prompt to mitigate injection.
+See [`SECURITY.md`](SECURITY.md) and [`docs/security.md`](docs/security.md).
+
+## Limitations (MVP)
+
+- **Python only** (architecture is language-independent; other parsers are interface stubs).
+- **Graph is syntax-heuristic**: only in-repo, confidently-resolved edges are stored
+  (incomplete-but-correct by design). Ambiguous/external calls are dropped.
+- **Exact vector scan** (no HNSW yet — added when dataset size warrants).
+- **Token counts are estimates** for budgeting; authoritative counts come from the LLM's usage
+  report (stored in `llm_requests`).
+- Default `hashing` embedder is lexical-overlap, not truly semantic.
+- Analyzer workflow produces **fix context + proposals**; patch apply/verify is a caller
+  interface (bounded by `MAX_FIX_ATTEMPTS`).
+- The MVP `AuthorizationProvider` is permissive (development). Deploy a real one.
+
+## API
+
+`uvicorn coderag.api.app:app` exposes `POST /repositories`, `/repositories/{id}/index`,
+`GET /repositories/{id}/index/status`, `POST /search`, `POST /context`, `POST /ask`,
+`GET /symbols/{id}`, `/symbols/{id}/relationships`, and `GET /metrics`.
+
+## Development
+
+```bash
+make lint typecheck test      # ruff + mypy + pytest
+```
+
+Tests use [`pgserver`](https://pypi.org/project/pgserver/) — a rootless, bundled
+PostgreSQL+pgvector — so the DB/FTS/vector paths are exercised for real, no Docker required.
+
+Licensed under **Apache-2.0**. Dependency licenses (incl. the psycopg LGPL and pylint GPL
+flags) are in [`docs/licenses.md`](docs/licenses.md).

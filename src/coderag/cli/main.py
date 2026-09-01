@@ -123,9 +123,13 @@ def ask(
     with session_scope() as session:
         from coderag.service import run_ask
 
-        repo_obj, package, response, outcome = run_ask(
-            session, query, repo, max_tokens=max_tokens
-        )
+        try:
+            repo_obj, package, response, outcome = run_ask(
+                session, query, repo, max_tokens=max_tokens
+            )
+        except RuntimeError as exc:
+            console.print(f"[red]Cannot run ask:[/] {exc}")
+            raise typer.Exit(2) from None
         console.print(f"\n[bold cyan]Answer[/] (repo: {repo_obj.name}):\n")
         console.print(response.text)
         if show_tokens:
