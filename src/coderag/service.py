@@ -66,9 +66,41 @@ def get_engine(
 def run_search(
     session: Session, query: str, repo_name: str | None = None, top_n: int = 10,
     settings: Settings | None = None, *, semantic: bool = False, graph: bool = False,
+    record: bool = False,
 ) -> tuple[Repository, RetrievalOutcome]:
     settings = settings or get_settings()
     repo = resolve_repository(session, repo_name)
     engine = get_engine(settings, semantic=semantic, graph=graph)
     outcome = engine.search(session, repo.id, query, top_n=top_n)
+    if record:
+        from coderag.telemetry import record_query
+
+        record_query(session, repo.id, query, "search", outcome.latency_ms,
+                     candidates=outcome.candidates)
     return repo, outcome
+
+
+def run_context(
+    session: Session, query: str, repo_name: str | None = None,
+    settings: Settings | None = None, *, semantic: bool = True, graph: bool = True,
+    max_tokens: int | None = None, finding: str | None = None,
+    changed_symbol_ids: set[int] | None = None, record: bool = True,
+):
+    """Retrieve, then build the exact context that WOULD be sent to the LLM."""
+    from coderag.context.builder import ContextBuilder
+
+    settings = settings or get_settings()
+    repo = resolve_repository(session, repo_name)
+    engine = get_engine(settings, semantic=semantic, graph=graph)
+    outcome = engine.search(session, repo.id, query, top_n=None)
+    builder = ContextBuilder(session, settings=settings)
+    package = builder.build(
+        query, outcome.candidates, repo,
+        changed_symbol_ids=changed_symbol_ids, finding=finding, max_tokens=max_tokens,
+    )
+    if record:
+        from coderag.telemetry import record_query
+
+        record_query(session, repo.id, query, "context", outcome.latency_ms,
+                     package=package, candidates=outcome.candidates)
+    return repo, package, outcome

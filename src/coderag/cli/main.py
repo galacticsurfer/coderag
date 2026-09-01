@@ -68,6 +68,48 @@ def search(
         _print_candidates(repo_obj.name, outcome)
 
 
+@app.command()
+def context(
+    query: str = typer.Argument(..., help="Task / question."),
+    repo: str | None = typer.Option(None, "--repo"),
+    max_tokens: int | None = typer.Option(None, "--max-tokens",
+                                          help="Override the context token budget."),
+    show_prompt: bool = typer.Option(False, "--show-prompt",
+                                     help="Print the full prompt that would go to the LLM."),
+) -> None:
+    """Show the exact context (and token accounting) that WOULD be sent to the LLM.
+
+    No LLM is called — useful for debugging token usage.
+    """
+    with session_scope() as session:
+        from coderag.service import run_context
+
+        repo_obj, package, _outcome = run_context(session, query, repo, max_tokens=max_tokens)
+        acct = package.accounting
+        table = Table(title=f"Context for '{repo_obj.name}'")
+        table.add_column("category")
+        table.add_column("symbol", style="cyan", overflow="fold")
+        table.add_column("lines", justify="right", style="dim")
+        table.add_column("tokens", justify="right")
+        table.add_column("why", style="magenta")
+        for title, entries in package.sections():
+            for e in entries:
+                c = e.candidate
+                table.add_row(title, c.qualified_name,
+                              f"{c.start_line}-{c.end_line}", str(e.tokens), c.explain())
+        console.print(table)
+        console.print(
+            f"[bold]selected[/] {acct.candidates_selected}/{acct.candidates_found}  "
+            f"[bold]candidate_tokens[/] {acct.candidate_tokens}  "
+            f"[bold]context_tokens[/] {acct.context_tokens}  "
+            f"[bold]dropped[/] {acct.dropped_tokens}  "
+            f"[bold]final_prompt_tokens[/] {acct.final_prompt_tokens}  "
+            f"[green]reduction {acct.token_reduction_from_candidates}%[/]"
+        )
+        if show_prompt:
+            console.print("\n" + package.prompt_text)
+
+
 def _print_candidates(repo_name: str, outcome) -> None:
     table = Table(title=f"Results in '{repo_name}'  ({outcome.latency_ms:.1f} ms)")
     table.add_column("#", justify="right", style="dim")
