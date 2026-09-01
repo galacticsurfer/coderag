@@ -25,6 +25,63 @@ def _main(verbose: bool = typer.Option(False, "--verbose", "-v")) -> None:
     configure_logging("DEBUG" if verbose else "WARNING")
 
 
+localdb_app = typer.Typer(help="Rootless local PostgreSQL (no Docker/sudo needed).")
+app.add_typer(localdb_app, name="localdb")
+
+
+@localdb_app.command("start")
+def localdb_start(
+    pgdata: str | None = typer.Option(None, "--pgdata", help="Data directory."),
+    migrate: bool = typer.Option(True, "--migrate/--no-migrate",
+                                 help="Apply database migrations after starting."),
+) -> None:
+    """Start a local PostgreSQL (with pgvector) and print its URL."""
+    from coderag import localdb
+
+    try:
+        url = localdb.start(pgdata)
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1) from None
+    console.print(f"[green]PostgreSQL running.[/]\n\n  export CODERAG_DATABASE_URL='{url}'\n")
+    if migrate:
+        import os
+        import subprocess
+
+        env = dict(os.environ, CODERAG_DATABASE_URL=url)
+        r = subprocess.run(["alembic", "upgrade", "head"], env=env,
+                           capture_output=True, text=True)
+        if r.returncode == 0:
+            console.print("[green]Migrations applied.[/]")
+        else:
+            console.print(
+                "[yellow]Could not run migrations automatically "
+                "(run `alembic upgrade head` from a repo checkout).[/]"
+            )
+
+
+@localdb_app.command("stop")
+def localdb_stop(
+    pgdata: str | None = typer.Option(None, "--pgdata"),
+) -> None:
+    """Stop the local PostgreSQL server."""
+    from coderag import localdb
+
+    localdb.stop(pgdata)
+    console.print("[green]Stopped.[/]")
+
+
+@localdb_app.command("status")
+def localdb_status(
+    pgdata: str | None = typer.Option(None, "--pgdata"),
+) -> None:
+    """Show whether the local PostgreSQL server is running."""
+    from coderag import localdb
+
+    pid = localdb.status(pgdata)
+    console.print(f"[green]running (pid {pid})[/]" if pid else "[yellow]not running[/]")
+
+
 @app.command()
 def index(
     path: str = typer.Argument(..., help="Path to the repository to index."),

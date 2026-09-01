@@ -41,6 +41,8 @@ metrics = ["prometheus-client>=0.20"]
 analyzers = ["pylint>=3.2", "flake8>=7.1"]
 # MCP server: lets Claude Code (and other MCP clients) call CodeRAG retrieval.
 mcp = ["mcp>=2.0"]
+# Rootless local PostgreSQL+pgvector — no Docker, Homebrew, or sudo required.
+localdb = ["pgserver>=0.1.4", "alembic>=1.13"]
 # Development / testing.
 dev = [
     "pytest>=8.2",

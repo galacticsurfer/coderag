@@ -48,6 +48,21 @@ Full details: [`docs/architecture.md`](docs/architecture.md), plus ADRs in
 
 ## Install
 
+**macOS / no Docker (easiest):** ships a rootless bundled PostgreSQL+pgvector — no Docker,
+Homebrew, or `sudo`:
+
+```bash
+pipx install "coderag[mcp,localdb] @ git+https://github.com/galacticsurfer/coderag"
+coderag localdb start            # starts Postgres + applies migrations, prints the URL
+export CODERAG_DATABASE_URL='…'  # the URL it prints
+coderag index /path/to/your-project --name myproject
+coderag search "where is authentication handled?"
+```
+
+Full walkthrough incl. Claude Code wiring: [`docs/install-macos.md`](docs/install-macos.md).
+
+Other install forms:
+
 ```bash
 # from source (this repo)
 pip install git+https://github.com/galacticsurfer/coderag
