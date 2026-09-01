@@ -52,7 +52,7 @@ Full details: [`docs/architecture.md`](docs/architecture.md), plus ADRs in
 Homebrew, or `sudo`:
 
 ```bash
-pipx install "coderag[mcp,localdb] @ git+https://github.com/galacticsurfer/coderag"
+pipx install "code-rag[mcp,localdb]"
 coderag localdb start            # starts Postgres + applies migrations, prints the URL
 export CODERAG_DATABASE_URL='…'  # the URL it prints
 coderag index /path/to/your-project --name myproject
@@ -64,13 +64,18 @@ Full walkthrough incl. Claude Code wiring: [`docs/install-macos.md`](docs/instal
 Other install forms:
 
 ```bash
-# from source (this repo)
-pip install git+https://github.com/galacticsurfer/coderag
-# with local semantic embeddings (pulls torch)
-pip install "coderag[embeddings] @ git+https://github.com/galacticsurfer/coderag"
+# from PyPI
+pip install code-rag
+# with local semantic embeddings (pulls torch, ~2GB)
+pip install "code-rag[embeddings]"
+# straight from git (no PyPI needed)
+pipx install "code-rag[mcp,localdb] @ git+https://github.com/galacticsurfer/coderag"
 # or clone + editable
 git clone https://github.com/galacticsurfer/coderag && cd coderag && pip install -e ".[dev]"
 ```
+
+> **Distribution name is `code-rag`** (plain `coderag` was taken on PyPI by an unrelated
+> project). The CLI command, the MCP binary, and the import name are all still `coderag`.
 
 This installs the `coderag` CLI and the `coderag.api.app` FastAPI app. Extras: `embeddings`
 (SentenceTransformers), `tokens` (tiktoken), `analyzers` (pylint/flake8), `metrics`
@@ -161,7 +166,7 @@ subclassing for AWS Bedrock — needs no changes to the retrieval layer
 
 ```
 CODERAG_EMBEDDING_PROVIDER=hashing            # offline default (deterministic)
-# or, for genuine semantics (installs torch): pip install 'coderag[embeddings]'
+# or, for genuine semantics (installs torch): pip install 'code-rag[embeddings]'
 CODERAG_EMBEDDING_PROVIDER=sentence_transformer
 CODERAG_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
 ```
@@ -270,7 +275,7 @@ Claude Code reads whole files to build context. Register CodeRAG as an **MCP ser
 call `coderag_context` / `coderag_search` instead — getting only the budgeted, relevant symbols:
 
 ```bash
-pipx install "coderag[mcp] @ git+https://github.com/galacticsurfer/coderag"
+pipx install "code-rag[mcp]"
 claude mcp add coderag \
   --env CODERAG_DATABASE_URL=postgresql+psycopg://coderag:coderag@localhost:5432/coderag \
   --env CODERAG_DEFAULT_REPOSITORY=myrepo -- coderag-mcp

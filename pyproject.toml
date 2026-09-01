@@ -3,14 +3,31 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "coderag"
-version = "0.1.0"
+# Distribution name on PyPI ("pipx install code-rag"); the import name and the CLI
+# command are both `coderag`. ("coderag" was already taken on PyPI by another project.)
+name = "code-rag"
+version = "0.3.0"
 description = "Token-efficient, structure-aware Code Intelligence + RAG for private source repositories."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
 authors = [{ name = "CodeRAG contributors" }]
-keywords = ["rag", "code-intelligence", "retrieval", "pgvector", "llm"]
+keywords = [
+    "rag", "code-intelligence", "retrieval", "pgvector", "llm", "mcp",
+    "claude", "code-search", "tree-sitter", "token-optimization",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Processing :: Indexing",
+    "Typing :: Typed",
+]
+
 
 # Base install: retrieval platform works WITHOUT an LLM and WITHOUT heavy ML deps.
 dependencies = [
@@ -56,6 +73,13 @@ dev = [
 [project.scripts]
 coderag = "coderag.cli.main:app"
 coderag-mcp = "coderag.mcp_server:main"
+
+[project.urls]
+Homepage = "https://github.com/galacticsurfer/coderag"
+Repository = "https://github.com/galacticsurfer/coderag"
+Documentation = "https://github.com/galacticsurfer/coderag/tree/main/docs"
+Issues = "https://github.com/galacticsurfer/coderag/issues"
+Changelog = "https://github.com/galacticsurfer/coderag/releases"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/coderag"]

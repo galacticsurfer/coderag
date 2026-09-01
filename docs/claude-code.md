@@ -31,8 +31,8 @@ This boots PostgreSQL+pgvector, applies migrations, and serves the API + dashboa
 ## Step 2 — Install the CodeRAG CLI + MCP server
 
 ```bash
-pipx install "coderag[mcp] @ git+https://github.com/galacticsurfer/coderag"
-# or: pip install --user "coderag[mcp] @ git+https://github.com/galacticsurfer/coderag"
+pipx install "code-rag[mcp]"
+# or: pip install --user "code-rag[mcp]"
 ```
 
 `pipx` is recommended — it puts `coderag` and `coderag-mcp` on your PATH in an isolated env,
@@ -139,7 +139,7 @@ spawns. So "releasing" it means making that command installable. Options, easies
 
 1. **Install from GitHub (works today, nothing to publish):** Step 2 above. Team members run
    the same `pipx install …` line.
-2. **Publish to PyPI** so it's `pipx install "coderag[mcp]"`:
+2. **Publish to PyPI** so it's `pipx install "code-rag[mcp]"`:
    ```bash
    python -m pip install build twine
    python -m build                     # dist/*.whl + *.tar.gz
