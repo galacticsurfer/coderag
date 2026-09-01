@@ -286,6 +286,10 @@ def metrics(session: Session = Depends(get_session)) -> s.MetricsOut:
     ) or 0)
     saved_vs_files = base_sum - base_ctx
     reduction_vs_files = round(100.0 * saved_vs_files / base_sum, 1) if base_sum else 0.0
+    from coderag.core.config import get_settings
+
+    _s = get_settings()
+    pin, pout = _s.price_input_per_mtok, _s.price_output_per_mtok
     return s.MetricsOut(
         repositories=count(Repository), symbols=count(Symbol),
         embeddings=count(SymbolEmbedding), relationships=count(SymbolRelationship),
@@ -297,6 +301,10 @@ def metrics(session: Session = Depends(get_session)) -> s.MetricsOut:
         total_tokens_saved=saved, avg_token_reduction_percent=reduction,
         total_baseline_tokens=base_sum, total_saved_vs_files=saved_vs_files,
         reduction_vs_files_percent=reduction_vs_files,
+        price_input_per_mtok=pin, price_output_per_mtok=pout,
+        cost_saved_vs_files_usd=round(saved_vs_files / 1e6 * pin, 4),
+        cost_context_sent_usd=round(int(ctx_sum) / 1e6 * pin, 4),
+        cost_llm_usd=round(int(in_tok) / 1e6 * pin + int(out_tok) / 1e6 * pout, 4),
     )
 
 

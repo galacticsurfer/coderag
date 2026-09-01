@@ -158,6 +158,12 @@ class MetricsOut(BaseModel):
     total_baseline_tokens: int
     total_saved_vs_files: int
     reduction_vs_files_percent: float
+    # Indicative USD at the configured per-million prices (estimates, not billing)
+    price_input_per_mtok: float
+    price_output_per_mtok: float
+    cost_saved_vs_files_usd: float
+    cost_context_sent_usd: float
+    cost_llm_usd: float
 
 
 class QueryRow(BaseModel):

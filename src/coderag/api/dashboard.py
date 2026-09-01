@@ -109,6 +109,7 @@ DASHBOARD_HTML = r"""<!doctype html>
   </header>
 
   <section class="kpis" id="kpis"></section>
+  <p style="font-size:12px;color:var(--muted);margin:-14px 0 22px">Dollar figures are estimates at the configured per-million prices (CODERAG_PRICE_INPUT_PER_MTOK / _OUTPUT_PER_MTOK) — not billing data. On a flat-rate Claude plan, savings show up as headroom rather than a refund.</p>
 
   <section class="card">
     <h2>Context vs. saved — recent queries</h2>
@@ -143,6 +144,7 @@ DASHBOARD_HTML = r"""<!doctype html>
 <script>
 const n = x => (x==null? "—" : Number(x).toLocaleString());
 const pct = x => (x==null? "—" : Number(x).toFixed(1) + "%");
+const usd = x => (x==null? "—" : "$" + Number(x).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}));
 const esc = s => (s||"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
 function tile(label, val, unit, hero){
@@ -153,7 +155,10 @@ function tile(label, val, unit, hero){
 function renderKpis(m){
   document.getElementById('kpis').innerHTML =
     tile('Saved vs reading files', n(m.total_saved_vs_files), 'tok', true) +
+    tile('Est. $ saved', usd(m.cost_saved_vs_files_usd), '', true) +
     tile('Reduction vs files', pct(m.reduction_vs_files_percent), '', true) +
+    tile('Est. $ context sent', usd(m.cost_context_sent_usd)) +
+    tile('Est. $ LLM spend', usd(m.cost_llm_usd)) +
     tile('Whole-file baseline', n(m.total_baseline_tokens), 'tok') +
     tile('Tokens saved (budgeting)', n(m.total_tokens_saved)) +
     tile('Overall reduction', pct(m.avg_token_reduction_percent)) +

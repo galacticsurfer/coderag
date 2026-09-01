@@ -77,3 +77,28 @@ def test_mcp_context_includes_measurement(db_session, demo_repo):
     out = coderag_context("retry failed payment", repository="payments")
     assert "fewer input tokens" in out["measurement"]
     assert out["token_accounting"]["baseline_tokens"] > 0
+
+
+def test_metrics_exposes_dollar_estimates(db_session, demo_repo):
+    """Token savings are convertible to indicative USD at configured prices."""
+    from coderag.core.config import get_settings
+
+    run_context(db_session, "retry failed payment", "payments")
+    db_session.commit()
+
+    client = TestClient(app)
+    m = client.get("/metrics").json()
+    s = get_settings()
+    assert m["price_input_per_mtok"] == s.price_input_per_mtok
+    # dollars must be a faithful function of tokens and the configured price
+    expected = round(m["total_saved_vs_files"] / 1e6 * s.price_input_per_mtok, 4)
+    assert m["cost_saved_vs_files_usd"] == expected
+    assert m["cost_context_sent_usd"] >= 0.0
+    assert m["cost_llm_usd"] >= 0.0
+
+
+def test_price_settings_are_configurable():
+    from coderag.core.config import Settings
+
+    s = Settings(price_input_per_mtok=3.0, price_output_per_mtok=15.0)
+    assert s.price_input_per_mtok == 3.0 and s.price_output_per_mtok == 15.0

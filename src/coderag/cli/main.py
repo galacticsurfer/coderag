@@ -195,9 +195,15 @@ def context(
                       f"{acct.final_prompt_tokens:,}")
             console.print(t)
             if acct.baseline_tokens:
+                price = get_settings().price_input_per_mtok
+                saved_usd = acct.tokens_saved_vs_files / 1e6 * price
                 console.print(
                     f"[green]saved {acct.tokens_saved_vs_files:,} tokens "
-                    f"({acct.reduction_vs_files}%) vs opening those files[/]"
+                    f"({acct.reduction_vs_files}%) vs opening those files[/]  "
+                    f"[dim]≈ ${saved_usd:.4f} at ${price:.2f}/M input tokens; "
+                    f"× 1,000 similar queries ≈ ${saved_usd * 1000:.2f}[/]\n"
+                    f"[dim]Estimate at configured prices, not billing data. On a "
+                    f"flat-rate plan this is headroom, not a refund.[/]"
                 )
             else:
                 console.print("[yellow]No baseline recorded (nothing selected).[/]")

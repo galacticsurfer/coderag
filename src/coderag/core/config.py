@@ -85,6 +85,13 @@ class Settings(BaseSettings):
     llm_max_output_tokens: int = 1024
     llm_timeout_seconds: float = 60.0
 
+    # ---- Cost estimation -------------------------------------------------
+    # USD per million tokens, used only to turn token counts into indicative
+    # dollar figures. Defaults are Claude Opus 4.8 list prices; override for your
+    # model/plan. These are ESTIMATES at configured prices — not billing data.
+    price_input_per_mtok: float = 5.00
+    price_output_per_mtok: float = 25.00
+
     # ---- Analyzers (Phase 10) ------------------------------------------
     max_fix_attempts: int = 2
 
