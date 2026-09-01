@@ -20,6 +20,11 @@ from sqlalchemy.orm import Session
 os.environ.setdefault("CODERAG_EMBEDDING_PROVIDER", "hashing")
 os.environ.setdefault("CODERAG_TOKEN_COUNTER", "heuristic")
 
+# Configure robust (stream-resilient) logging once for the whole test session.
+from coderag.core.logging import configure_logging  # noqa: E402
+
+configure_logging("WARNING")
+
 
 def _sqlalchemy_url(libpq_uri: str) -> str:
     return libpq_uri.replace("postgresql://", "postgresql+psycopg://", 1)
@@ -49,6 +54,21 @@ def engine(pg_uri: str) -> Iterator[Engine]:
     configure_engine(eng)
     yield eng
     eng.dispose()
+
+
+DEMO_REPO_PATH = str(
+    __import__("pathlib").Path(__file__).resolve().parents[1] / "examples" / "demo-repository"
+)
+
+
+@pytest.fixture
+def demo_repo(db_session: Session):
+    """Index the bundled demo 'payments' repository and return its Repository."""
+    from coderag.indexing.indexer import index_repository
+
+    repo, _run, _stats = index_repository(db_session, "payments", DEMO_REPO_PATH)
+    db_session.commit()
+    return repo
 
 
 @pytest.fixture

@@ -60,8 +60,8 @@ _SECRET_CONTENT_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         re.compile(
             r"""(?ix)
             \b(?:api[_-]?key|secret|password|passwd|token|access[_-]?key)\b
-            \s*[:=]\s*
-            ['"]?([A-Za-z0-9_\-./+]{12,})['"]?
+            [ \t]*[:=][ \t]*          # key/sep/value must stay on one line
+            ['"]([A-Za-z0-9_\-./+]{12,})['"]   # value must be quoted
             """
         ),
     ),
