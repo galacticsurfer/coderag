@@ -45,19 +45,17 @@ def localdb_start(
         raise typer.Exit(1) from None
     console.print(f"[green]PostgreSQL running.[/]\n\n  export CODERAG_DATABASE_URL='{url}'\n")
     if migrate:
-        import os
-        import subprocess
+        # Uses Alembic's Python API against the packaged migrations — an installed
+        # wheel has neither the `alembic` console script on PATH nor alembic.ini.
+        from coderag.db.migrate import upgrade_to_head
 
-        env = dict(os.environ, CODERAG_DATABASE_URL=url)
-        r = subprocess.run(["alembic", "upgrade", "head"], env=env,
-                           capture_output=True, text=True)
-        if r.returncode == 0:
+        try:
+            upgrade_to_head(url)
             console.print("[green]Migrations applied.[/]")
-        else:
-            console.print(
-                "[yellow]Could not run migrations automatically "
-                "(run `alembic upgrade head` from a repo checkout).[/]"
-            )
+        except Exception as exc:
+            console.print(f"[red]Migrations failed:[/] {exc}")
+            console.print("[yellow]Retry with:[/] coderag migrate")
+            raise typer.Exit(1) from None
 
 
 @localdb_app.command("stop")
@@ -80,6 +78,23 @@ def localdb_status(
 
     pid = localdb.status(pgdata)
     console.print(f"[green]running (pid {pid})[/]" if pid else "[yellow]not running[/]")
+
+
+@app.command()
+def migrate(
+    database_url: str | None = typer.Option(
+        None, "--database-url", help="Defaults to CODERAG_DATABASE_URL."
+    ),
+) -> None:
+    """Create/upgrade the database schema (works from a pip/pipx install)."""
+    from coderag.db.migrate import current_revision, upgrade_to_head
+
+    try:
+        url = upgrade_to_head(database_url)
+    except Exception as exc:
+        console.print(f"[red]Migration failed:[/] {exc}")
+        raise typer.Exit(1) from None
+    console.print(f"[green]Database is up to date[/] (revision {current_revision(url)}).")
 
 
 @app.command()
