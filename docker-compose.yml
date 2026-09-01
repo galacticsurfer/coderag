@@ -1,0 +1,36 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: coderag
+      POSTGRES_PASSWORD: coderag
+      POSTGRES_DB: coderag
+    ports:
+      - "5432:5432"
+    volumes:
+      - coderag_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coderag -d coderag"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      CODERAG_DATABASE_URL: postgresql+psycopg://coderag:coderag@db:5432/coderag
+      # Set these to enable `coderag ask`; retrieval works without them.
+      CODERAG_ANTHROPIC_API_KEY: ${CODERAG_ANTHROPIC_API_KEY:-}
+      CODERAG_ANTHROPIC_MODEL: ${CODERAG_ANTHROPIC_MODEL:-claude-sonnet-5}
+      CODERAG_EMBEDDING_PROVIDER: ${CODERAG_EMBEDDING_PROVIDER:-hashing}
+    ports:
+      - "8000:8000"
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn coderag.api.app:app --host 0.0.0.0 --port 8000"
+
+volumes:
+  coderag_pgdata:
