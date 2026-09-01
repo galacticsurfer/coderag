@@ -38,6 +38,7 @@ def index(
         console.print(
             f"[green]Indexed[/] [bold]{repo.name}[/] @ {stats.commit_sha or 'no-commit'}: "
             f"{stats.files_indexed} files, {stats.symbols_indexed} symbols, "
+            f"{stats.embeddings_created} embeddings, "
             f"{stats.files_skipped} skipped, {stats.secrets_redacted} redactions "
             f"in {stats.duration_seconds:.2f}s"
         )
@@ -48,8 +49,8 @@ def search(
     query: str = typer.Argument(..., help="Search query."),
     repo: str | None = typer.Option(None, "--repo", help="Repository name."),
     limit: int = typer.Option(10, "--limit", "-n"),
-    semantic: bool = typer.Option(False, "--semantic/--no-semantic",
-                                  help="Include semantic (vector) retrieval (Phase 3)."),
+    semantic: bool = typer.Option(True, "--semantic/--no-semantic",
+                                  help="Include semantic (vector) retrieval."),
     graph: bool = typer.Option(False, "--graph/--no-graph",
                                help="Include one-hop dependency expansion (Phase 4)."),
 ) -> None:

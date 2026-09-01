@@ -33,6 +33,7 @@ class IndexStats:
     symbols_indexed: int = 0
     files_skipped: int = 0
     secrets_redacted: int = 0
+    embeddings_created: int = 0
     duration_seconds: float = 0.0
     commit_sha: str | None = None
 
@@ -65,11 +66,13 @@ class Indexer:
         session: Session,
         settings: Settings | None = None,
         token_counter: TokenCounter | None = None,
+        embed: bool = True,
     ) -> None:
         self.session = session
         self.settings = settings or get_settings()
         self.tokens = token_counter or get_token_counter(self.settings)
         self.extra_ignore = self.settings.extra_ignore
+        self.embed = embed
 
     # -- full index -------------------------------------------------------
     def full_index(self, repo: Repository) -> tuple[IndexingRun, IndexStats]:
@@ -96,10 +99,14 @@ class Indexer:
                     continue
                 self._index_file(repo, rel_path, commit, git, stats)
 
+            if self.embed:
+                stats.embeddings_created = self._embed(repo)
+
             stats.duration_seconds = time.perf_counter() - started
             run.status = "success"
             run.files_indexed = stats.files_indexed
             run.symbols_indexed = stats.symbols_indexed
+            run.embeddings_created = stats.embeddings_created
             run.duration_seconds = stats.duration_seconds
             from sqlalchemy import func
 
@@ -118,6 +125,13 @@ class Indexer:
             log.error("full_index.failed", repository=repo.name, error=str(exc)[:200])
             raise
         return run, stats
+
+    def _embed(self, repo: Repository) -> int:
+        from coderag.embeddings.pipeline import EmbeddingPipeline
+        from coderag.embeddings.registry import get_embedding_provider
+
+        provider = get_embedding_provider(self.settings)
+        return EmbeddingPipeline(self.session, provider).embed_repository(repo)
 
     # -- per-file ---------------------------------------------------------
     def _index_file(
