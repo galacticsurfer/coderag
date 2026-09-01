@@ -58,6 +58,29 @@ coderag-mcp = "coderag.mcp_server:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/coderag"]
 
+# Keep the sdist to actual project sources. Without an explicit include, the
+# extension's node_modules (25MB, 5k files) gets swept in.
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/examples",
+    "/docs",
+    "/docker",
+    "/scripts",
+    "/alembic.ini",
+    "/Dockerfile",
+    "/docker-compose.yml",
+    "/Makefile",
+    "/README.md",
+    "/LICENSE",
+    "/NOTICE",
+    "/CONTRIBUTING.md",
+    "/SECURITY.md",
+    "/CODE_OF_CONDUCT.md",
+    "/.env.example",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
