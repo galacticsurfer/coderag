@@ -34,9 +34,19 @@ class PythonParser(LanguageParser):
     extensions = (".py",)
 
     def __init__(self) -> None:
-        self._lang = Language(tspython.language(), "python")
-        self._parser = Parser()
-        self._parser.set_language(self._lang)
+        # The tree-sitter Python API changed at 0.22: `Language(ptr)` lost its
+        # `name` argument and `Parser.set_language()` was replaced by passing the
+        # language to the constructor. Support both so the package installs on
+        # any platform/version combination (0.21 has no arm64 macOS wheel).
+        try:
+            self._lang = Language(tspython.language())  # tree-sitter >= 0.22
+        except TypeError:  # pragma: no cover - legacy tree-sitter 0.21
+            self._lang = Language(tspython.language(), "python")  # type: ignore[call-overload]
+        try:
+            self._parser = Parser(self._lang)  # tree-sitter >= 0.22
+        except TypeError:  # pragma: no cover - legacy tree-sitter 0.21
+            self._parser = Parser()
+            self._parser.set_language(self._lang)  # type: ignore[attr-defined]
 
     def parse(self, module_qualified_name: str, source: str) -> ParseResult:
         src = source.encode("utf-8")

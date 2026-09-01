@@ -19,10 +19,21 @@ def _require_pgserver():
     try:
         import pgserver  # noqa: PLC0415
     except ImportError as exc:  # pragma: no cover - optional dependency
+        import sys
+
+        if sys.version_info >= (3, 13):
+            raise RuntimeError(
+                f"`coderag localdb` needs pgserver, which has no wheels for Python "
+                f"{sys.version_info.major}.{sys.version_info.minor} (it supports 3.9–3.12).\n"
+                "Either install CodeRAG on Python 3.12:\n"
+                "    pipx install --python python3.12 'coderag-ai[mcp,localdb]'\n"
+                "or run PostgreSQL yourself (Docker: `docker compose up -d db`, or "
+                "Homebrew: `brew install postgresql@16 pgvector`) and set "
+                "CODERAG_DATABASE_URL."
+            ) from exc
         raise RuntimeError(
             "pgserver is not installed. Install the 'localdb' extra:\n"
-            "    pipx install 'coderag[mcp,localdb] @ "
-            "git+https://github.com/galacticsurfer/coderag'"
+            "    pipx install 'coderag-ai[mcp,localdb]'"
         ) from exc
     return pgserver
 

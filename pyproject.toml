@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 # command are both `coderag`. Plain "coderag" is taken on PyPI by an unrelated project,
 # and "code-rag" is rejected as too similar (PyPI collapses -/_/. when comparing names).
 name = "coderag-ai"
-version = "0.3.0"
+version = "0.3.1"
 description = "Token-efficient, structure-aware Code Intelligence + RAG for private source repositories."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -40,8 +40,8 @@ dependencies = [
     "alembic>=1.13",
     "psycopg[binary]>=3.1",        # LGPL-3.0 — see docs/licenses.md
     "pgvector>=0.3.0",
-    "tree-sitter>=0.21,<0.22",
-    "tree-sitter-python>=0.21,<0.22",
+    "tree-sitter>=0.23",
+    "tree-sitter-python>=0.23",
     "typer>=0.12",
     "rich>=13.7",
     "httpx>=0.27",
@@ -60,7 +60,10 @@ analyzers = ["pylint>=3.2", "flake8>=7.1"]
 # MCP server: lets Claude Code (and other MCP clients) call CodeRAG retrieval.
 mcp = ["mcp>=2.0"]
 # Rootless local PostgreSQL+pgvector — no Docker, Homebrew, or sudo required.
-localdb = ["pgserver>=0.1.4", "alembic>=1.13"]
+# pgserver only ships wheels for CPython 3.9–3.12, so the marker keeps the extra
+# installable on newer interpreters (the `coderag localdb` command then explains
+# what to do instead of the install failing outright).
+localdb = ["pgserver>=0.1.4; python_version < '3.13'", "alembic>=1.13"]
 # Development / testing.
 dev = [
     "pytest>=8.2",

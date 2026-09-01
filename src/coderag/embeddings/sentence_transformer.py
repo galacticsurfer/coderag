@@ -21,13 +21,18 @@ class SentenceTransformerEmbeddingProvider(EmbeddingProvider):
         except ImportError as exc:  # pragma: no cover - optional dependency
             raise RuntimeError(
                 "sentence-transformers is not installed. Install the 'embeddings' "
-                "extra: pip install 'coderag[embeddings]'"
+                "extra: pip install 'coderag-ai[embeddings]'"
             ) from exc
         self._model = SentenceTransformer(model_name, device=device)
         self.model_name = model_name
         self.model_version = "st1"
         self.batch_size = batch_size
-        self.dimension = int(self._model.get_sentence_embedding_dimension())
+        dim = self._model.get_sentence_embedding_dimension()
+        if dim is None:  # pragma: no cover - model without a fixed dimension
+            raise RuntimeError(
+                f"model {model_name!r} does not report an embedding dimension"
+            )
+        self.dimension = int(dim)
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         vectors = self._model.encode(

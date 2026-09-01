@@ -23,6 +23,14 @@ Open a new terminal afterwards so your `PATH` updates.
 
 ### 2. Install CodeRAG
 
+> **Python version:** the `localdb` extra needs **Python 3.9–3.12** (its bundled
+> PostgreSQL has no wheels for 3.13+). On a newer default Python use
+> `pipx install --python python3.12 "coderag-ai[mcp,localdb]"` (`brew install python@3.12`),
+> or install without `localdb` and supply your own PostgreSQL.
+
+> **Corporate network?** If install fails with `invalid peer certificate: UnknownIssuer`,
+> your proxy re-signs TLS. Fix with `export UV_NATIVE_TLS=true` (uses the macOS keychain).
+
 ```bash
 pipx install "coderag-ai[mcp,localdb]"
 ```
