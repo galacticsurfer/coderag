@@ -369,6 +369,32 @@ Why the design is shaped this way:
 - Savings counters are on `GET /coderag-proxy/health`. Note the stored originals contain tool
   output from your machine — they stay local, in your home directory, and are never uploaded.
 
+## `coderag doctor` — where is the money actually going?
+
+Once the proxy has observed some traffic, ask the doctor:
+
+```bash
+coderag doctor
+```
+
+It attributes every observed dollar to one of four categories — **fresh input** (1× the input
+price), **cache reads** (0.1×), **cache writes** (1.25×), **output** (typically 5× input) — and
+then runs a rule engine over *your* traffic to rank the levers by estimated $ impact:
+
+| Diagnosis | Fires when | Lever |
+|---|---|---|
+| Output-dominant spend | output ≥ 50% of observed cost | lower `effort`, terse-output rules (`/token-lean`) |
+| Cache barely hit | large repeated inputs, hit rate < 40% | find what invalidates your prompt prefix |
+| Context growing steeply | per-request input ≥ 2× across the window | `/compact`, fresh sessions per task |
+| Retrieval unused | LLM traffic but no CodeRAG queries | check `/mcp` + the CLAUDE.md nudge |
+| Tool output heavy | tool_result ≥ 20% of fresh input | `coderag proxy --compress` |
+
+Every diagnosis cites the observed numbers it rests on and states the assumption behind its
+estimate — because the honest answer is sometimes "this lever wouldn't help *you*". The same
+report is on the dashboard (`/dashboard`) and as JSON at `GET /doctor`. All dollar figures are
+estimates at the configured prices (`CODERAG_PRICE_INPUT_PER_MTOK` /
+`CODERAG_PRICE_OUTPUT_PER_MTOK`), computed from observed traffic — not billing data.
+
 ## Composes with other token-efficiency tools
 
 CodeRAG attacks **one slice** of token spend: the code you'd otherwise read whole files to get.

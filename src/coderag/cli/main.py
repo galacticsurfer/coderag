@@ -217,6 +217,63 @@ def proxy(
 
 
 @app.command()
+def doctor() -> None:
+    """Attribute observed LLM spend and rank the cost levers for YOUR traffic.
+
+    Reads usage recorded by `coderag proxy` (and `ask`). Run the proxy for a
+    while first — no observed traffic means no diagnosis.
+    """
+    from coderag.doctor import examine_from_db
+
+    settings = get_settings()
+    with session_scope() as session:
+        report = examine_from_db(
+            session, settings.price_input_per_mtok, settings.price_output_per_mtok
+        )
+    b = report.breakdown
+    if b.requests == 0:
+        console.print(
+            "[yellow]No observed LLM traffic yet.[/] Run [bold]coderag proxy[/] and "
+            "point your agent at it (export ANTHROPIC_BASE_URL=http://127.0.0.1:8788), "
+            "then come back."
+        )
+        raise typer.Exit(0)
+
+    t = Table(title=f"Where the money went — {b.requests} observed requests")
+    t.add_column("category")
+    t.add_column("tokens", justify="right")
+    t.add_column("rate")
+    t.add_column("$", justify="right")
+    pin = settings.price_input_per_mtok
+    pout = settings.price_output_per_mtok
+    t.add_row("fresh input", f"{b.fresh_input_tokens:,}", f"${pin}/M",
+              f"{b.fresh_input_usd:.4f}")
+    t.add_row("cache reads", f"{b.cache_read_tokens:,}", f"${pin * 0.1:.2f}/M",
+              f"{b.cache_read_usd:.4f}")
+    t.add_row("cache writes", f"{b.cache_write_tokens:,}", f"${pin * 1.25:.2f}/M",
+              f"{b.cache_write_usd:.4f}")
+    t.add_row("output", f"{b.output_tokens:,}", f"${pout}/M", f"{b.output_usd:.4f}")
+    t.add_row("[bold]total[/]", "", "", f"[bold]{b.total_usd:.4f}[/]")
+    console.print(t)
+    console.print(f"cache hit rate: {100 * b.cache_hit_rate:.0f}%\n")
+
+    if not report.diagnoses:
+        console.print("[green]No obvious waste found in the observed window.[/] "
+                      "The biggest levers look already pulled.")
+    for i, d in enumerate(report.diagnoses, 1):
+        est = f"est. saving ${d.est_saving_usd:.4f}" if d.est_saving_usd else "unquantified"
+        console.print(f"[bold]{i}. {d.title}[/]  [green]({est})[/]")
+        console.print(f"   evidence: {d.evidence}")
+        console.print(f"   action:   {d.action}")
+        console.print(f"   [dim]assumption: {d.assumption}[/]\n")
+    console.print(
+        "[dim]All dollar figures are estimates at the configured prices "
+        "(CODERAG_PRICE_INPUT_PER_MTOK / _OUTPUT_PER_MTOK), computed from observed "
+        "traffic — not billing data.[/]"
+    )
+
+
+@app.command()
 def migrate(
     database_url: str | None = typer.Option(
         None, "--database-url", help="Defaults to CODERAG_DATABASE_URL."

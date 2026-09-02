@@ -122,6 +122,12 @@ DASHBOARD_HTML = r"""<!doctype html>
   </section>
 
   <section class="card">
+    <h2>Doctor — where the money goes</h2>
+    <p class="hint">Attribution of observed LLM traffic (via <code>coderag proxy</code>) and the levers ranked by estimated impact. Estimates at configured prices, not billing data.</p>
+    <div id="doctor" class="empty">No observed traffic yet — run <b>coderag proxy</b> and point your agent at it.</div>
+  </section>
+
+  <section class="card">
     <h2>Query log</h2>
     <p class="hint">Most recent first. Saved = candidate tokens − context tokens.</p>
     <div class="tablewrap">
@@ -216,13 +222,44 @@ function renderTable(rows){
   document.getElementById('foot').textContent = `Showing ${rows.length} most recent queries.`;
 }
 
+function renderDoctor(d){
+  const el = document.getElementById('doctor');
+  const b = d.breakdown;
+  if(!b.requests){ return; }
+  el.classList.remove('empty');
+  const cat = [
+    ['fresh input', b.fresh_input_tokens, b.fresh_input_usd],
+    ['cache reads', b.cache_read_tokens, b.cache_read_usd],
+    ['cache writes', b.cache_write_tokens, b.cache_write_usd],
+    ['output', b.output_tokens, b.output_usd],
+  ];
+  const maxUsd = Math.max(...cat.map(c=>c[2]), 1e-9);
+  let html = '<div class="bars">' + cat.map(([name,tok,usdv]) =>
+    `<div class="bar-row"><div class="bar-lbl">${name}</div>`+
+    `<div class="track"><div class="seg context" style="width:${100*usdv/maxUsd}%"></div></div>`+
+    `<div class="bar-red">${usd(usdv)}</div></div>`).join('') + '</div>';
+  html += `<p class="hint" style="margin-top:10px">total ${usd(b.total_usd)} over ${n(b.requests)} requests · cache hit rate ${(100*b.cache_hit_rate).toFixed(0)}%</p>`;
+  if(d.diagnoses.length){
+    html += '<ol style="font-size:12.5px;padding-left:18px;margin:8px 0">' + d.diagnoses.map(x =>
+      `<li style="margin-bottom:8px"><b>${esc(x.title)}</b>`+
+      (x.est_saving_usd ? ` <span style="color:var(--saved-ink);font-weight:600">est. ${usd(x.est_saving_usd)}</span>` : '')+
+      `<br><span style="color:var(--ink2)">${esc(x.evidence)}</span>`+
+      `<br>→ ${esc(x.action)}`+
+      `<br><span style="color:var(--muted)">${esc(x.assumption)}</span></li>`).join('') + '</ol>';
+  } else {
+    html += '<p class="hint">No obvious waste found in the observed window.</p>';
+  }
+  el.innerHTML = html;
+}
+
 async function load(){
   try{
-    const [m, q] = await Promise.all([
+    const [m, q, doc] = await Promise.all([
       fetch('metrics').then(r=>r.json()),
       fetch('queries?limit=200').then(r=>r.json()),
+      fetch('doctor').then(r=>r.json()),
     ]);
-    renderKpis(m); renderBars(q); renderTable(q);
+    renderKpis(m); renderBars(q); renderTable(q); renderDoctor(doc);
   }catch(e){
     document.getElementById('kpis').innerHTML =
       '<div class="empty">Could not reach the API. Is the CodeRAG server running?</div>';

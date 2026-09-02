@@ -352,6 +352,30 @@ def recent_queries(
     return out
 
 
+@app.get("/doctor")
+def doctor_endpoint(session: Session = Depends(get_session)) -> dict:
+    """Cost attribution + ranked recommendations from observed traffic."""
+    from dataclasses import asdict
+
+    from coderag.core.config import get_settings
+    from coderag.doctor import examine_from_db
+
+    settings = get_settings()
+    report = examine_from_db(
+        session, settings.price_input_per_mtok, settings.price_output_per_mtok
+    )
+    b = report.breakdown
+    return {
+        "breakdown": {
+            **asdict(b),
+            "total_usd": round(b.total_usd, 4),
+            "cache_hit_rate": round(b.cache_hit_rate, 3),
+        },
+        "diagnoses": [asdict(d) for d in report.diagnoses],
+        "note": "Estimates at configured prices from observed traffic — not billing data.",
+    }
+
+
 @app.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
 def dashboard() -> str:
     from coderag.api.dashboard import DASHBOARD_HTML

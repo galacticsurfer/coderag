@@ -51,6 +51,8 @@ class ObservedUsage:
     input_tokens: int = 0
     output_tokens: int = 0
     cached_input_tokens: int | None = None
+    cache_creation_input_tokens: int | None = None
+    tool_result_chars: int = 0
     status_code: int = 0
     streamed: bool = False
 
@@ -68,6 +70,8 @@ def _record(usage: ObservedUsage, latency_ms: float) -> None:
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,
                 cached_input_tokens=usage.cached_input_tokens,
+                cache_creation_input_tokens=usage.cache_creation_input_tokens,
+                tool_result_chars=usage.tool_result_chars,
                 latency_ms=latency_ms,
                 success=200 <= usage.status_code < 300,
                 error=None if 200 <= usage.status_code < 300
@@ -89,6 +93,8 @@ def _usage_from_json(body: bytes, usage: ObservedUsage) -> None:
     usage.output_tokens = int(u.get("output_tokens") or 0)
     if u.get("cache_read_input_tokens") is not None:
         usage.cached_input_tokens = int(u["cache_read_input_tokens"])
+    if u.get("cache_creation_input_tokens") is not None:
+        usage.cache_creation_input_tokens = int(u["cache_creation_input_tokens"])
 
 
 def _usage_from_sse_line(line: str, usage: ObservedUsage) -> None:
@@ -110,6 +116,8 @@ def _usage_from_sse_line(line: str, usage: ObservedUsage) -> None:
         usage.input_tokens = int(u.get("input_tokens") or 0)
         if u.get("cache_read_input_tokens") is not None:
             usage.cached_input_tokens = int(u["cache_read_input_tokens"])
+        if u.get("cache_creation_input_tokens") is not None:
+            usage.cache_creation_input_tokens = int(u["cache_creation_input_tokens"])
     elif etype == "message_delta":
         u = event.get("usage") or {}
         if u.get("output_tokens") is not None:
@@ -148,6 +156,7 @@ def create_app(upstream: str = DEFAULT_UPSTREAM, compress: bool = False) -> Fast
     )
     async def forward(request: Request, path: str) -> Response:
         body = await request.body()
+        original_body = body
         headers = {
             k: v for k, v in request.headers.items()
             if k.lower() not in _STRIP_REQUEST_HEADERS
@@ -190,6 +199,10 @@ def create_app(upstream: str = DEFAULT_UPSTREAM, compress: bool = False) -> Fast
 
         started = time.perf_counter()
         usage = ObservedUsage()
+        if request.method == "POST" and is_messages_endpoint:
+            from coderag.compression import tool_result_chars_in_body
+
+            usage.tool_result_chars = tool_result_chars_in_body(original_body)
 
         http: httpx.AsyncClient = request.app.state.client
         upstream_request = http.build_request(

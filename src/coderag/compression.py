@@ -199,3 +199,29 @@ def _maybe(
     stats.chars_in += len(text)
     stats.chars_out += len(new)
     return new
+
+
+def tool_result_chars_in_body(raw: bytes) -> int:
+    """Characters of tool_result content in a Messages request body (count only)."""
+    try:
+        data = json.loads(raw)
+        total = 0
+        for message in data.get("messages", []):
+            if not isinstance(message, dict) or message.get("role") != "user":
+                continue
+            content = message.get("content")
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "tool_result":
+                    continue
+                inner = block.get("content")
+                if isinstance(inner, str):
+                    total += len(inner)
+                elif isinstance(inner, list):
+                    for sub in inner:
+                        if isinstance(sub, dict) and isinstance(sub.get("text"), str):
+                            total += len(sub["text"])
+        return total
+    except Exception:  # noqa: BLE001 - observability only
+        return 0

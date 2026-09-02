@@ -251,6 +251,13 @@ class LLMRequest(Base):
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     cached_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Tokens written to the provider's prompt cache this request (billed ~1.25x).
+    cache_creation_input_tokens: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    # Characters of tool_result content observed in the request body (counts
+    # only — content itself is never stored). Feeds the --compress diagnostic.
+    tool_result_chars: Mapped[int] = mapped_column(Integer, default=0)
     latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
     success: Mapped[bool] = mapped_column(Boolean, default=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
