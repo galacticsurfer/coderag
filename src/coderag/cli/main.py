@@ -182,6 +182,34 @@ def setup(
 
 
 @app.command()
+def proxy(
+    port: int = typer.Option(8788, "--port"),
+    host: str = typer.Option("127.0.0.1", "--host",
+                             help="Bind address. Keep it loopback-only."),
+    upstream: str = typer.Option(
+        "https://api.anthropic.com", "--upstream",
+        help="Where to forward traffic (another proxy works — chaining is fine)."),
+) -> None:
+    """Run the observability proxy: forwards LLM traffic unmodified, records real
+    provider-billed token usage to the dashboard.
+
+    Point your agent at it:  export ANTHROPIC_BASE_URL=http://127.0.0.1:8788
+    """
+    import uvicorn
+
+    from coderag.proxy import create_app
+
+    console.print(
+        f"[green]Observability proxy[/] -> forwarding to [cyan]{upstream}[/]\n\n"
+        f"  export ANTHROPIC_BASE_URL=http://{host}:{port}\n\n"
+        "[dim]Traffic passes through byte-for-byte unmodified. Only token counts, "
+        "model, latency, and status are recorded — never prompts, responses, or "
+        "credentials. View at the dashboard's 'Est. $ LLM spend' / LLM tiles.[/]"
+    )
+    uvicorn.run(create_app(upstream), host=host, port=port, log_level="warning")
+
+
+@app.command()
 def migrate(
     database_url: str | None = typer.Option(
         None, "--database-url", help="Defaults to CODERAG_DATABASE_URL."

@@ -313,6 +313,34 @@ skill is also *probabilistic* (the model decides to apply it), where a proxy is 
 Its effect is **not measured by CodeRAG**, which only sees its own retrieval, never the host
 agent's total usage. Check your client's own cost reporting.
 
+## The observability proxy — measure real usage, not estimates
+
+Everything above measures CodeRAG's *own* retrieval. Your agent's actual LLM traffic (Claude
+Code's real billed tokens) never passes through CodeRAG — until you run the proxy:
+
+```bash
+coderag proxy                                    # listens on 127.0.0.1:8788
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8788  # point your agent at it
+```
+
+Every request is forwarded **byte-for-byte unmodified** — headers, body, streaming included.
+The proxy does exactly one extra thing: it reads the `usage` numbers out of responses and
+records them, so the dashboard's LLM input/output tiles show **provider-billed tokens** instead
+of zeros. That's what turns "estimated savings" into a before/after you can actually check.
+
+Hard guarantees, enforced by tests:
+- **No compression, rewriting, caching, or routing.** Anything that changes bytes can change
+  model behaviour; this proxy never does. (Byte-fidelity is asserted in the test suite,
+  streaming included.)
+- **No prompts, responses, or credentials are ever stored** — only token counts, model,
+  latency, and status.
+- **A database failure cannot break your traffic** — recording is fire-and-forget.
+- Binds to loopback only by default.
+
+It chains: `--upstream http://127.0.0.1:8787` forwards to another proxy (e.g. a compression
+proxy) instead of the API, so you can observe *and* compress:
+`agent → coderag proxy (measure) → compression proxy → api.anthropic.com`.
+
 ## Composes with other token-efficiency tools
 
 CodeRAG attacks **one slice** of token spend: the code you'd otherwise read whole files to get.

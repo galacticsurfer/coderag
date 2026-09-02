@@ -1,0 +1,203 @@
+"""Observability proxy: see real LLM token usage without modifying traffic.
+
+Point a client's ``ANTHROPIC_BASE_URL`` at this proxy and every request is
+forwarded to the upstream API **byte-for-byte unmodified** (headers, body,
+streaming included). The only thing the proxy does besides forwarding is read
+the *usage* numbers out of responses and record them to the ``llm_requests``
+table — so the dashboard finally shows the provider-billed input/output tokens
+of the agent actually using CodeRAG (e.g. Claude Code), not just estimates.
+
+Deliberate non-goals, stated up front:
+  * No compression, rewriting, caching, or routing. Anything that changes bytes
+    can change model behaviour; this proxy never does.
+  * No persistence of prompts, responses, or credentials. Only token counts,
+    model name, latency, and status are stored (see SECURITY.md).
+
+Security posture:
+  * Binds to 127.0.0.1 only, by default.
+  * Auth headers (``x-api-key`` / ``authorization``) are forwarded upstream and
+    never logged or written to the database.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+
+import httpx
+from fastapi import FastAPI, Request
+from fastapi.responses import Response, StreamingResponse
+
+from coderag.core.logging import get_logger
+
+log = get_logger("proxy")
+
+DEFAULT_UPSTREAM = "https://api.anthropic.com"
+
+# hop-by-hop / recomputed headers we must not blindly forward back
+_STRIP_RESPONSE_HEADERS = {
+    "content-encoding", "content-length", "transfer-encoding", "connection",
+}
+_STRIP_REQUEST_HEADERS = {"host", "content-length", "accept-encoding", "connection"}
+
+
+@dataclass
+class ObservedUsage:
+    model: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_input_tokens: int | None = None
+    status_code: int = 0
+    streamed: bool = False
+
+
+def _record(usage: ObservedUsage, latency_ms: float) -> None:
+    """Persist observed usage. Never allowed to break proxying."""
+    try:
+        from coderag.db.base import session_scope
+        from coderag.db.models import LLMRequest
+
+        with session_scope() as session:
+            session.add(LLMRequest(
+                provider="proxy",
+                model=usage.model or "unknown",
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                cached_input_tokens=usage.cached_input_tokens,
+                latency_ms=latency_ms,
+                success=200 <= usage.status_code < 300,
+                error=None if 200 <= usage.status_code < 300
+                else f"upstream status {usage.status_code}",
+            ))
+    except Exception as exc:  # noqa: BLE001 - observability must not break traffic
+        log.warning("proxy.record_failed", error=str(exc)[:120])
+
+
+def _usage_from_json(body: bytes, usage: ObservedUsage) -> None:
+    """Extract usage from a non-streaming Messages API response body."""
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return
+    usage.model = data.get("model", usage.model)
+    u = data.get("usage") or {}
+    usage.input_tokens = int(u.get("input_tokens") or 0)
+    usage.output_tokens = int(u.get("output_tokens") or 0)
+    if u.get("cache_read_input_tokens") is not None:
+        usage.cached_input_tokens = int(u["cache_read_input_tokens"])
+
+
+def _usage_from_sse_line(line: str, usage: ObservedUsage) -> None:
+    """Opportunistically parse one SSE data line for usage fields."""
+    if not line.startswith("data:"):
+        return
+    payload = line[len("data:"):].strip()
+    if not payload or payload == "[DONE]":
+        return
+    try:
+        event = json.loads(payload)
+    except json.JSONDecodeError:
+        return
+    etype = event.get("type")
+    if etype == "message_start":
+        msg = event.get("message") or {}
+        usage.model = msg.get("model", usage.model)
+        u = msg.get("usage") or {}
+        usage.input_tokens = int(u.get("input_tokens") or 0)
+        if u.get("cache_read_input_tokens") is not None:
+            usage.cached_input_tokens = int(u["cache_read_input_tokens"])
+    elif etype == "message_delta":
+        u = event.get("usage") or {}
+        if u.get("output_tokens") is not None:
+            usage.output_tokens = int(u["output_tokens"])
+
+
+def create_app(upstream: str = DEFAULT_UPSTREAM) -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # pragma: no cover
+        yield
+        await app.state.client.aclose()
+
+    app = FastAPI(title="CodeRAG observability proxy", docs_url=None,
+                  redoc_url=None, lifespan=lifespan)
+    app.state.upstream = upstream
+    app.state.client = httpx.AsyncClient(
+        base_url=upstream, timeout=httpx.Timeout(600.0)
+    )
+
+    @app.get("/coderag-proxy/health")
+    async def health() -> dict:
+        return {"status": "ok", "upstream": upstream}
+
+    @app.api_route(
+        "/{path:path}",
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+    )
+    async def forward(request: Request, path: str) -> Response:
+        body = await request.body()
+        headers = {
+            k: v for k, v in request.headers.items()
+            if k.lower() not in _STRIP_REQUEST_HEADERS
+        }
+        url = f"/{path}"
+        if request.url.query:
+            url = f"{url}?{request.url.query}"
+
+        started = time.perf_counter()
+        usage = ObservedUsage()
+
+        http: httpx.AsyncClient = request.app.state.client
+        upstream_request = http.build_request(
+            request.method, url, headers=headers, content=body
+        )
+        upstream_response = await http.send(upstream_request, stream=True)
+        usage.status_code = upstream_response.status_code
+        response_headers = {
+            k: v for k, v in upstream_response.headers.items()
+            if k.lower() not in _STRIP_RESPONSE_HEADERS
+        }
+        content_type = upstream_response.headers.get("content-type", "")
+        is_messages = path.strip("/").endswith("v1/messages") or "/messages" in url
+
+        if "text/event-stream" in content_type:
+            usage.streamed = True
+
+            async def stream() -> AsyncIterator[bytes]:
+                buffer = ""
+                try:
+                    async for chunk in upstream_response.aiter_bytes():
+                        # tee: parse for usage, but always yield bytes unmodified
+                        with contextlib.suppress(Exception):
+                            buffer += chunk.decode("utf-8", "ignore")
+                            while "\n" in buffer:
+                                line, buffer = buffer.split("\n", 1)
+                                _usage_from_sse_line(line.strip("\r"), usage)
+                        yield chunk
+                finally:
+                    await upstream_response.aclose()
+                    if is_messages:
+                        _record(usage, (time.perf_counter() - started) * 1000)
+
+            return StreamingResponse(
+                stream(),
+                status_code=upstream_response.status_code,
+                headers=response_headers,
+                media_type="text/event-stream",
+            )
+
+        content = await upstream_response.aread()
+        await upstream_response.aclose()
+        if is_messages:
+            _usage_from_json(content, usage)
+            _record(usage, (time.perf_counter() - started) * 1000)
+        return Response(
+            content=content,
+            status_code=upstream_response.status_code,
+            headers=response_headers,
+        )
+
+    return app
