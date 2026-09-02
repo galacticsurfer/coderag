@@ -81,6 +81,97 @@ def localdb_status(
 
 
 @app.command()
+def setup(
+    path: str = typer.Argument(".", help="Repository to index (default: current dir)."),
+    name: str | None = typer.Option(None, "--name", help="Repository name."),
+    mcp: bool = typer.Option(True, "--mcp/--no-mcp", help="Register with Claude Code."),
+    claude_md: bool = typer.Option(True, "--claude-md/--no-claude-md",
+                                   help="Append the retrieval nudge to CLAUDE.md."),
+) -> None:
+    """One command: start the database, migrate, index, and wire up Claude Code."""
+    from pathlib import Path
+
+    from coderag import localdb
+    from coderag.core.config import get_settings
+    from coderag.db.migrate import upgrade_to_head
+    from coderag.setup_flow import (
+        SetupResult,
+        append_nudge,
+        claude_md_needs_nudge,
+        register_mcp,
+    )
+
+    repo_path = Path(path).expanduser().resolve()
+    repo_name = name or repo_path.name
+    res = SetupResult(repository=repo_name)
+
+    # 1. database — reuse an already-configured one, else start the local server
+    import os
+
+    if os.environ.get("CODERAG_DATABASE_URL"):
+        res.database_url = get_settings().database_url
+        res.skip("using CODERAG_DATABASE_URL from the environment")
+    else:
+        try:
+            res.database_url = localdb.start()
+            res.ok("local PostgreSQL running (URL recorded; no export needed)")
+        except RuntimeError as exc:
+            res.warn(str(exc).splitlines()[0])
+            console.print(f"[red]{exc}[/]")
+            raise typer.Exit(1) from None
+
+    # 2. schema
+    try:
+        upgrade_to_head(res.database_url)
+        res.ok("database schema up to date")
+    except Exception as exc:
+        res.warn(f"migrations failed: {str(exc)[:120]}")
+        console.print(f"[red]Migrations failed:[/] {exc}")
+        raise typer.Exit(1) from None
+
+    # 3. index
+    get_settings.cache_clear()
+    os.environ["CODERAG_DATABASE_URL"] = res.database_url or ""
+    with session_scope() as session:
+        from coderag.service import run_index
+
+        repo, stats = run_index(session, str(repo_path), repo_name)
+        res.symbols = stats.symbols_indexed
+    res.ok(f"indexed {repo_name}: {stats.files_indexed} files, "
+           f"{stats.symbols_indexed} symbols, {stats.relationships_created} relationships")
+
+    # 4. Claude Code MCP registration
+    if mcp:
+        done, msg = register_mcp("coderag", res.database_url or "", repo_name)
+        (res.ok if done else res.warn)(msg)
+    else:
+        res.skip("MCP registration skipped (--no-mcp)")
+
+    # 5. the nudge — without it Claude Code never calls the tools
+    if claude_md:
+        target = repo_path / "CLAUDE.md"
+        if claude_md_needs_nudge(target):
+            append_nudge(target)
+            res.ok(f"added the retrieval nudge to {target}")
+        else:
+            res.skip("CLAUDE.md already contains the nudge")
+    else:
+        res.skip("CLAUDE.md untouched (--no-claude-md)")
+
+    icons = {"ok": "[green]✓[/]", "skip": "[dim]·[/]", "warn": "[yellow]![/]"}
+    console.print("\n[bold]CodeRAG setup[/]")
+    for status, msg in res.steps:
+        console.print(f"  {icons[status]} {msg}")
+    console.print(
+        "\nTry it:  [bold]coderag search \"where is X handled?\"[/]\n"
+        "In Claude Code: run [bold]/mcp[/] (expect 'coderag' connected), then ask a "
+        "question normally — MCP tools are not slash commands.\n"
+        "Dashboard: [bold]uvicorn coderag.api.app:app --port 8000[/] "
+        "-> http://localhost:8000/dashboard"
+    )
+
+
+@app.command()
 def migrate(
     database_url: str | None = typer.Option(
         None, "--database-url", help="Defaults to CODERAG_DATABASE_URL."

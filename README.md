@@ -48,15 +48,21 @@ Full details: [`docs/architecture.md`](docs/architecture.md), plus ADRs in
 
 ## Install
 
-**macOS / no Docker (easiest):** ships a rootless bundled PostgreSQL+pgvector — no Docker,
-Homebrew, or `sudo`:
+**Two commands.** Ships a rootless bundled PostgreSQL+pgvector — no Docker, Homebrew, or `sudo`:
 
 ```bash
 pipx install "coderag-ai[mcp,localdb]"
-coderag localdb start            # starts Postgres + applies migrations, prints the URL
-export CODERAG_DATABASE_URL='…'  # the URL it prints
-coderag index /path/to/your-project --name myproject
-coderag search "where is authentication handled?"
+cd /path/to/your-project && coderag setup
+```
+
+`coderag setup` starts the database, applies migrations, indexes the repo, registers the MCP
+server with Claude Code, and appends the retrieval nudge to your `CLAUDE.md` — the step that
+makes Claude Code actually call the tools. It records the database URL, so **no
+`export CODERAG_DATABASE_URL` is needed**; later commands find it automatically. Re-running is
+safe (it won't duplicate the nudge). Opt out with `--no-mcp` / `--no-claude-md`.
+
+```bash
+coderag search "where is authentication handled?"   # works in any new shell
 ```
 
 Full walkthrough incl. Claude Code wiring: [`docs/install-macos.md`](docs/install-macos.md).
@@ -286,6 +292,37 @@ Tools: `coderag_context`, `coderag_search`, `coderag_symbol`, `coderag_repositor
 needed — Claude Code is the LLM. **Full step-by-step:**
 [`docs/claude-code.md`](docs/claude-code.md). Copy-pasteable `.mcp.json` + `CLAUDE.md` snippet,
 with **real** captured tool output: [`examples/mcp/`](examples/mcp/).
+
+## Composes with other token-efficiency tools
+
+CodeRAG attacks **one slice** of token spend: the code you'd otherwise read whole files to get.
+It does nothing about output tokens, conversation history, cache placement, or model routing.
+Tools that target those slices stack with it, because the slices are disjoint:
+
+| Slice | Billed at | CodeRAG | Tools like [Caveman](https://caveman.so) |
+|---|---|:--:|:--:|
+| File-reading input | 1× input | ✅ retrieval instead of whole files | — |
+| Output tokens | **5× input** | ❌ | ✅ output compression |
+| Conversation history | ~0.1× (cached) | ❌ | ✅ context compression |
+| Cache placement | — | ❌ | ✅ automatic breakpoints |
+| Model routing | varies | ❌ | ✅ cheapest model passing evals |
+
+Savings on disjoint slices are near-additive. On a typical mid-session turn, CodeRAG's measured
+file-slice reduction works out to ~26% of cost; adding an output-compression layer takes the
+combined figure to roughly ~38%. **Both halves of that are models, not measurements** — verify
+on your own workload before believing either.
+
+**Wiring:** they use different mechanisms and don't conflict — CodeRAG is an MCP server, a
+compression skill is a Skill, a proxy is an `ANTHROPIC_BASE_URL`. CodeRAG's own `ask` can also
+route through such a proxy, since the LLM base URL is configurable:
+
+```bash
+export CODERAG_ANTHROPIC_BASE_URL=http://localhost:<proxy-port>
+```
+
+Enable one at a time and compare `/cost` between them — a proxy that compresses context may be
+compressing context CodeRAG already minimised, so the marginal gain can be smaller than the two
+vendors' claims added together.
 
 ## Editor integration (VS Code)
 

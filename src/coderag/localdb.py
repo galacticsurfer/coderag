@@ -13,6 +13,18 @@ from __future__ import annotations
 from pathlib import Path
 
 DEFAULT_PGDATA = Path.home() / ".coderag" / "pgdata"
+# `localdb start` records its URL here so other commands (and the MCP server)
+# find the database automatically, without the user exporting anything.
+URL_FILE = Path.home() / ".coderag" / "database_url"
+
+
+def saved_url() -> str | None:
+    """The URL recorded by the most recent `localdb start`, if any."""
+    try:
+        value = URL_FILE.read_text().strip()
+    except OSError:
+        return None
+    return value or None
 
 
 def _require_pgserver():
@@ -51,6 +63,13 @@ def start(pgdata: Path | str | None = None) -> str:
     server = pgserver.get_server(str(path), cleanup_mode=None)
     url = sqlalchemy_url(server.get_uri())
     _ensure_vector_extension(url)
+    # Record it (default location only) so later commands need no env var.
+    if Path(pgdata or DEFAULT_PGDATA).expanduser() == DEFAULT_PGDATA:
+        try:
+            URL_FILE.parent.mkdir(parents=True, exist_ok=True)
+            URL_FILE.write_text(url + "\n")
+        except OSError:  # pragma: no cover - convenience only, never fatal
+            pass
     return url
 
 

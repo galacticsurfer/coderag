@@ -12,6 +12,19 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+COMPOSE_DATABASE_URL = "postgresql+psycopg://coderag:coderag@localhost:5432/coderag"
+
+
+def _default_database_url() -> str:
+    """Fall back to the URL written by `coderag localdb start`, else compose's."""
+    from pathlib import Path
+
+    try:
+        value = (Path.home() / ".coderag" / "database_url").read_text().strip()
+    except OSError:
+        return COMPOSE_DATABASE_URL
+    return value or COMPOSE_DATABASE_URL
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -23,9 +36,9 @@ class Settings(BaseSettings):
 
     # ---- Database -------------------------------------------------------
     # A libpq URL. In dev/test the pgserver fixture overrides this.
-    database_url: str = Field(
-        default="postgresql+psycopg://coderag:coderag@localhost:5432/coderag"
-    )
+    # Resolution order: CODERAG_DATABASE_URL env/.env -> the URL recorded by
+    # `coderag localdb start` -> the docker-compose default.
+    database_url: str = Field(default_factory=lambda: _default_database_url())
     db_echo: bool = False
 
     # Default repository name used when a request doesn't name one (handy for the

@@ -70,3 +70,30 @@ def test_start_does_not_shell_out_to_psql(tmp_path, monkeypatch):
         assert got, "pgvector extension should have been created"
     finally:
         localdb.stop(pgdata)
+
+
+def test_start_records_url_only_for_default_pgdata(tmp_path, monkeypatch):
+    """A non-default --pgdata must not clobber the recorded default URL."""
+    from coderag import localdb as m
+
+    monkeypatch.setattr(m, "URL_FILE", tmp_path / "database_url")
+    pgdata = tmp_path / "custom"
+    url = m.start(pgdata)
+    try:
+        assert not (tmp_path / "database_url").exists()  # custom dir -> not recorded
+        assert url.startswith("postgresql+psycopg://")
+    finally:
+        m.stop(pgdata)
+
+
+def test_setup_helpers_are_idempotent(tmp_path):
+    from coderag.setup_flow import append_nudge, claude_md_needs_nudge
+
+    target = tmp_path / "CLAUDE.md"
+    target.write_text("# My project\n\nExisting notes.\n")
+    assert claude_md_needs_nudge(target)
+    append_nudge(target)
+    body = target.read_text()
+    assert "Existing notes." in body           # never clobbers existing content
+    assert body.count("## Code search") == 1
+    assert not claude_md_needs_nudge(target)   # second run is a no-op
