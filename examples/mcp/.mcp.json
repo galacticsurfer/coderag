@@ -1,0 +1,23 @@
+{
+  "$comment": [
+    "Copy this file to the ROOT of the project you want Claude Code to search,",
+    "rename it to '.mcp.json', and edit the two values below.",
+    "  command  -> absolute path to coderag-mcp ('which coderag-mcp').",
+    "              An absolute path matters: Claude Code spawns the process",
+    "              without your shell's PATH.",
+    "  CODERAG_DATABASE_URL -> the URL 'coderag localdb start' printed",
+    "                          ('echo $CODERAG_DATABASE_URL'). JSON has no shell",
+    "                          expansion, so paste the literal value.",
+    "  CODERAG_DEFAULT_REPOSITORY -> the --name you indexed with.",
+    "Then reload VS Code / restart Claude Code and run /mcp to confirm."
+  ],
+  "mcpServers": {
+    "coderag": {
+      "command": "/Users/you/.local/bin/coderag-mcp",
+      "env": {
+        "CODERAG_DATABASE_URL": "postgresql+psycopg://postgres:@/postgres?host=/Users/you/.coderag/pgdata",
+        "CODERAG_DEFAULT_REPOSITORY": "myproject"
+      }
+    }
+  }
+}

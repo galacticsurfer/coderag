@@ -284,7 +284,8 @@ claude mcp add coderag \
 Tools: `coderag_context`, `coderag_search`, `coderag_symbol`, `coderag_repositories`,
 `coderag_index`. Every call is recorded, so `/dashboard` shows the savings live. No API key
 needed — Claude Code is the LLM. **Full step-by-step:**
-[`docs/claude-code.md`](docs/claude-code.md).
+[`docs/claude-code.md`](docs/claude-code.md). Copy-pasteable `.mcp.json` + `CLAUDE.md` snippet,
+with **real** captured tool output: [`examples/mcp/`](examples/mcp/).
 
 ## Editor integration (VS Code)
 
