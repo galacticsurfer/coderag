@@ -116,7 +116,7 @@ def _usage_from_sse_line(line: str, usage: ObservedUsage) -> None:
             usage.output_tokens = int(u["output_tokens"])
 
 
-def create_app(upstream: str = DEFAULT_UPSTREAM) -> FastAPI:
+def create_app(upstream: str = DEFAULT_UPSTREAM, compress: bool = False) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # pragma: no cover
         yield
@@ -125,13 +125,22 @@ def create_app(upstream: str = DEFAULT_UPSTREAM) -> FastAPI:
     app = FastAPI(title="CodeRAG observability proxy", docs_url=None,
                   redoc_url=None, lifespan=lifespan)
     app.state.upstream = upstream
+    app.state.compress = compress
+    app.state.compression_totals = {
+        "requests_seen": 0, "requests_compressed": 0, "chars_in": 0, "chars_saved": 0,
+    }
     app.state.client = httpx.AsyncClient(
         base_url=upstream, timeout=httpx.Timeout(600.0)
     )
 
     @app.get("/coderag-proxy/health")
     async def health() -> dict:
-        return {"status": "ok", "upstream": upstream}
+        return {
+            "status": "ok",
+            "upstream": upstream,
+            "compress": app.state.compress,
+            "compression": dict(app.state.compression_totals),
+        }
 
     @app.api_route(
         "/{path:path}",
@@ -146,6 +155,38 @@ def create_app(upstream: str = DEFAULT_UPSTREAM) -> FastAPI:
         url = f"/{path}"
         if request.url.query:
             url = f"{url}?{request.url.query}"
+
+        url_path = f"/{path}"
+        is_messages_endpoint = url_path.rstrip("/").endswith("/messages")
+
+        # Opt-in, guarded compression of tool_result blocks in the request body.
+        # Deterministic (cache-safe); any failure forwards the original bytes.
+        if (
+            request.app.state.compress
+            and request.method == "POST"
+            and is_messages_endpoint
+        ):
+            from coderag.compression import compress_messages_body
+            from coderag.core.config import get_settings
+
+            totals = request.app.state.compression_totals
+            totals["requests_seen"] += 1
+            settings = get_settings()
+            result = compress_messages_body(
+                body,
+                threshold=settings.proxy_elide_threshold_chars,
+                keep=settings.proxy_elide_keep_chars,
+            )
+            if result is not None:
+                body, stats = result
+                totals["requests_compressed"] += 1
+                totals["chars_in"] += stats.chars_in
+                totals["chars_saved"] += stats.chars_saved
+                log.info(
+                    "proxy.compressed",
+                    blocks=stats.blocks_compressed,
+                    chars_saved=stats.chars_saved,
+                )
 
         started = time.perf_counter()
         usage = ObservedUsage()

@@ -341,6 +341,34 @@ It chains: `--upstream http://127.0.0.1:8787` forwards to another proxy (e.g. a 
 proxy) instead of the API, so you can observe *and* compress:
 `agent → coderag proxy (measure) → compression proxy → api.anthropic.com`.
 
+### Opt-in compression (`--compress`)
+
+```bash
+coderag proxy --compress
+```
+
+Adds a narrow, **cache-safe** compression layer for **tool-result blocks only** (logs, test
+runs, build output) in request bodies. Three deterministic transforms — ANSI stripping,
+consecutive-duplicate-line dedupe, blank-line squeeze — plus recoverable elision of oversized
+blocks: the middle is cut, the head/tail kept, and the raw original stored locally
+(`~/.coderag/proxy-cache/`, content-addressed). The marker names the key, and the agent can
+fetch the exact original back with the `coderag_expand` MCP tool.
+
+Why the design is shaped this way:
+
+- **Deterministic, or it costs you money.** The client resends original history every turn and
+  the proxy recompresses it; prompt caching is a prefix match, so identical input must produce
+  identical output or every turn invalidates the provider's ~0.1× cache discount. All
+  transforms are pure functions — determinism is asserted in the test suite.
+- **Tool results only.** System prompts, user text, assistant turns, and tool definitions are
+  never touched.
+- **Guarded.** Doesn't parse, doesn't shrink by a meaningful margin, or anything errors → the
+  original bytes are forwarded untouched.
+- **The byte-fidelity guarantee applies to observe-only mode.** `--compress` deliberately
+  modifies request bytes; that's the trade. It is off by default for exactly that reason.
+- Savings counters are on `GET /coderag-proxy/health`. Note the stored originals contain tool
+  output from your machine — they stay local, in your home directory, and are never uploaded.
+
 ## Composes with other token-efficiency tools
 
 CodeRAG attacks **one slice** of token spend: the code you'd otherwise read whole files to get.

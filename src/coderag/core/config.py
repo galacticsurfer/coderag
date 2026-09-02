@@ -105,6 +105,13 @@ class Settings(BaseSettings):
     price_input_per_mtok: float = 5.00
     price_output_per_mtok: float = 25.00
 
+    # ---- Proxy compression (opt-in via `coderag proxy --compress`) ------
+    # Elide the middle of tool-result blocks larger than this many characters
+    # (original stored locally, recoverable via the coderag_expand MCP tool).
+    proxy_elide_threshold_chars: int = 8000
+    # Total characters of head+tail kept around an elision.
+    proxy_elide_keep_chars: int = 3000
+
     # ---- Analyzers (Phase 10) ------------------------------------------
     max_fix_attempts: int = 2
 

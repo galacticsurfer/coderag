@@ -189,6 +189,11 @@ def proxy(
     upstream: str = typer.Option(
         "https://api.anthropic.com", "--upstream",
         help="Where to forward traffic (another proxy works — chaining is fine)."),
+    compress: bool = typer.Option(
+        False, "--compress",
+        help="Deterministically compress tool-result blocks in requests "
+             "(ANSI strip, log dedupe, recoverable elision of oversized output). "
+             "Off by default; originals stored in ~/.coderag/proxy-cache."),
 ) -> None:
     """Run the observability proxy: forwards LLM traffic unmodified, records real
     provider-billed token usage to the dashboard.
@@ -199,14 +204,16 @@ def proxy(
 
     from coderag.proxy import create_app
 
+    mode = "observe + compress tool results" if compress else "observe only (byte-fidelity)"
     console.print(
-        f"[green]Observability proxy[/] -> forwarding to [cyan]{upstream}[/]\n\n"
+        f"[green]Proxy[/] ({mode}) -> forwarding to [cyan]{upstream}[/]\n\n"
         f"  export ANTHROPIC_BASE_URL=http://{host}:{port}\n\n"
         "[dim]Traffic passes through byte-for-byte unmodified. Only token counts, "
         "model, latency, and status are recorded — never prompts, responses, or "
         "credentials. View at the dashboard's 'Est. $ LLM spend' / LLM tiles.[/]"
     )
-    uvicorn.run(create_app(upstream), host=host, port=port, log_level="warning")
+    uvicorn.run(create_app(upstream, compress=compress),
+                host=host, port=port, log_level="warning")
 
 
 @app.command()

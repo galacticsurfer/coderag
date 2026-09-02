@@ -200,6 +200,27 @@ def coderag_index(
         }
 
 
+@server.tool(
+    description=(
+        "Retrieve the full original text of tool output that the CodeRAG proxy "
+        "compressed or elided. Pass the key from a marker like "
+        "'[coderag: elided N chars ... coderag_expand(\"<key>\")]'."
+    )
+)
+def coderag_expand(key: str) -> dict[str, Any]:
+    from coderag.compression import load_original
+
+    text = load_original(key)
+    if text is None:
+        return {
+            "error": (
+                f"no stored original for key {key!r} — it may have been cleaned "
+                "up, or the key is malformed (expect 8-64 hex chars)"
+            )
+        }
+    return {"key": key, "chars": len(text), "text": text}
+
+
 def main() -> None:
     get_settings()  # fail fast on bad configuration
     server.run("stdio")
