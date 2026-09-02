@@ -97,3 +97,24 @@ def test_setup_helpers_are_idempotent(tmp_path):
     assert "Existing notes." in body           # never clobbers existing content
     assert body.count("## Code search") == 1
     assert not claude_md_needs_nudge(target)   # second run is a no-op
+
+
+def test_token_lean_skill_is_packaged_and_installs(tmp_path, monkeypatch):
+    """The skill must ship in the wheel and install idempotently."""
+    from coderag.setup_flow import install_skill, skill_source
+
+    src = skill_source()
+    assert src is not None and src.is_file(), "SKILL.md not packaged"
+    body = src.read_text()
+    assert body.startswith("---")                 # YAML frontmatter present
+    assert "name: token-lean" in body
+    assert "description:" in body                 # required for skill matching
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+    ok, msg = install_skill("user")
+    assert ok, msg
+    dest = tmp_path / ".claude" / "skills" / "token-lean" / "SKILL.md"
+    assert dest.is_file() and dest.read_text() == body
+    ok2, msg2 = install_skill("user")             # second run: no-op
+    assert ok2 and "already current" in msg2

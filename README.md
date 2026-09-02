@@ -293,6 +293,26 @@ needed — Claude Code is the LLM. **Full step-by-step:**
 [`docs/claude-code.md`](docs/claude-code.md). Copy-pasteable `.mcp.json` + `CLAUDE.md` snippet,
 with **real** captured tool output: [`examples/mcp/`](examples/mcp/).
 
+## The `/token-lean` skill
+
+`coderag setup` also installs a Claude Code **skill** at
+`~/.claude/skills/token-lean/` (skip with `--no-skill`). It covers both levers:
+
+- **Input** — prefer `coderag_search` / `coderag_context` over Glob/Grep/Read, with explicit
+  guidance on when reading whole files is still the right call.
+- **Output** — lead with the outcome, don't restate the request, don't echo visible code, don't
+  narrate routine tool calls, no closing offer-lists. Output is billed at ~5× input, so this
+  half usually matters more.
+
+It loads automatically when a task looks token-sensitive, or invoke it explicitly with
+`/token-lean`.
+
+**Be clear about what it is:** a set of instructions, not machinery. It cannot compress a
+prompt, place cache breakpoints, or route to a cheaper model — those need a proxy or gateway. A
+skill is also *probabilistic* (the model decides to apply it), where a proxy is deterministic.
+Its effect is **not measured by CodeRAG**, which only sees its own retrieval, never the host
+agent's total usage. Check your client's own cost reporting.
+
 ## Composes with other token-efficiency tools
 
 CodeRAG attacks **one slice** of token spend: the code you'd otherwise read whole files to get.

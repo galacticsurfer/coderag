@@ -77,6 +77,33 @@ def append_nudge(path: Path) -> None:
     path.write_text(existing + sep + NUDGE)
 
 
+def skill_source() -> Path | None:
+    """Path to the packaged `token-lean` SKILL.md, if it shipped with the install."""
+    candidate = Path(__file__).resolve().parent / "skills" / "token-lean" / "SKILL.md"
+    return candidate if candidate.is_file() else None
+
+
+def install_skill(scope: str = "user", project: Path | None = None) -> tuple[bool, str]:
+    """Copy the token-lean skill into Claude Code's skills directory.
+
+    scope="user"    -> ~/.claude/skills/token-lean/    (every project)
+    scope="project" -> <project>/.claude/skills/token-lean/  (committable)
+    """
+    src = skill_source()
+    if src is None:
+        return False, "packaged skill not found in this install"
+    root = Path.home() / ".claude" if scope == "user" else (project or Path.cwd()) / ".claude"
+    dest = root / "skills" / "token-lean" / "SKILL.md"
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.exists() and dest.read_text() == src.read_text():
+            return True, f"token-lean skill already current at {dest}"
+        dest.write_text(src.read_text())
+    except OSError as exc:
+        return False, f"could not install skill: {exc}"
+    return True, f"installed token-lean skill -> {dest} (invoke with /token-lean)"
+
+
 def register_mcp(name: str, database_url: str, repository: str) -> tuple[bool, str]:
     """Register the MCP server with Claude Code. Returns (done, message)."""
     if shutil.which("claude") is None:

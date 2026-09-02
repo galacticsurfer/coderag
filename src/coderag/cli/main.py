@@ -85,6 +85,8 @@ def setup(
     path: str = typer.Argument(".", help="Repository to index (default: current dir)."),
     name: str | None = typer.Option(None, "--name", help="Repository name."),
     mcp: bool = typer.Option(True, "--mcp/--no-mcp", help="Register with Claude Code."),
+    skill: bool = typer.Option(True, "--skill/--no-skill",
+                               help="Install the /token-lean skill for Claude Code."),
     claude_md: bool = typer.Option(True, "--claude-md/--no-claude-md",
                                    help="Append the retrieval nudge to CLAUDE.md."),
 ) -> None:
@@ -98,6 +100,7 @@ def setup(
         SetupResult,
         append_nudge,
         claude_md_needs_nudge,
+        install_skill,
         register_mcp,
     )
 
@@ -147,7 +150,14 @@ def setup(
     else:
         res.skip("MCP registration skipped (--no-mcp)")
 
-    # 5. the nudge — without it Claude Code never calls the tools
+    # 5. the token-lean skill (retrieval preference + output discipline)
+    if skill:
+        done, msg = install_skill("user")
+        (res.ok if done else res.warn)(msg)
+    else:
+        res.skip("skill install skipped (--no-skill)")
+
+    # 6. the nudge — without it Claude Code never calls the tools
     if claude_md:
         target = repo_path / "CLAUDE.md"
         if claude_md_needs_nudge(target):
