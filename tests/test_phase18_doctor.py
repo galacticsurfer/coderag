@@ -81,14 +81,16 @@ def test_r1_output_dominant():
 
 
 def test_r2_cache_misses():
-    rows = [Row(input_tokens=20_000, output_tokens=100, cached_input_tokens=0)
+    # some cache activity, but a poor hit rate (zero-activity is R7's territory)
+    rows = [Row(input_tokens=20_000, output_tokens=100, cached_input_tokens=1_000)
             for _ in range(6)]
     assert "cache_misses" in codes(rows)
     # too few requests -> silent
     assert "cache_misses" not in codes(rows[:4])
-    # small requests -> silent even with zero hits
+    # small requests -> silent even with poor hit rate
     assert "cache_misses" not in codes(
-        [Row(input_tokens=2_000, output_tokens=100) for _ in range(6)])
+        [Row(input_tokens=2_000, output_tokens=100, cached_input_tokens=100)
+         for _ in range(6)])
 
 
 def test_r3_history_growth():
@@ -232,7 +234,7 @@ def test_examine_from_db_and_endpoint(engine, db_session):
     report = D.examine_from_db(db_session, PIN, POUT)
     assert report.breakdown.requests == 12
     assert {d.code for d in report.diagnoses} >= {"output_dominant",
-                                                  "cache_misses",
+                                                  "no_caching",
                                                   "retrieval_unused"}
 
     app.dependency_overrides[get_session] = lambda: db_session

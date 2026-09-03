@@ -202,6 +202,11 @@ def proxy(
         None, "--cap-thinking",
         help="QUALITY TRADE-OFF: clamp an explicit thinking budget_tokens to "
              "this value (adaptive thinking is left untouched)."),
+    auto_cache: bool = typer.Option(
+        False, "--auto-cache",
+        help="Inject standard cache_control breakpoints (tools/system/last "
+             "message) into requests that have none. Never touches clients "
+             "that already cache. Big win for raw SDK traffic."),
 ) -> None:
     """Run the observability proxy: forwards LLM traffic unmodified, records real
     provider-billed token usage to the dashboard.
@@ -213,6 +218,8 @@ def proxy(
     from coderag.proxy import create_app
 
     mode = "observe + compress tool results" if compress else "observe only (byte-fidelity)"
+    if auto_cache:
+        mode += " + auto-cache"
     if cap_output is not None or cap_thinking is not None:
         caps = ", ".join(
             x for x in (
@@ -231,7 +238,8 @@ def proxy(
         "credentials. View at the dashboard's 'Est. $ LLM spend' / LLM tiles.[/]"
     )
     uvicorn.run(create_app(upstream, compress=compress,
-                           cap_output=cap_output, cap_thinking=cap_thinking),
+                           cap_output=cap_output, cap_thinking=cap_thinking,
+                           auto_cache=auto_cache),
                 host=host, port=port, log_level="warning")
 
 

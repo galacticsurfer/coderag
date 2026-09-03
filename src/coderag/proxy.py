@@ -136,6 +136,7 @@ def create_app(
     compress: bool = False,
     cap_output: int | None = None,
     cap_thinking: int | None = None,
+    auto_cache: bool = False,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # pragma: no cover
@@ -149,6 +150,8 @@ def create_app(
     app.state.cap_output = cap_output
     app.state.cap_thinking = cap_thinking
     app.state.cap_totals = {"requests_capped": 0}
+    app.state.auto_cache = auto_cache
+    app.state.auto_cache_totals = {"requests_cached": 0}
     app.state.compression_totals = {
         "requests_seen": 0, "requests_compressed": 0, "chars_in": 0, "chars_saved": 0,
     }
@@ -166,6 +169,8 @@ def create_app(
             "cap_output": app.state.cap_output,
             "cap_thinking": app.state.cap_thinking,
             "caps": dict(app.state.cap_totals),
+            "auto_cache": app.state.auto_cache,
+            "auto_cache_totals": dict(app.state.auto_cache_totals),
         }
 
     @app.api_route(
@@ -234,6 +239,22 @@ def create_app(
                     blocks=stats.blocks_compressed,
                     chars_saved=stats.chars_saved,
                 )
+
+        # Opt-in automatic cache placement: inject standard cache_control
+        # breakpoints into bodies that have none. Runs after compression so
+        # breakpoints attach to the final content. Guarded; never touches a
+        # client that already manages its own caching.
+        if (
+            request.app.state.auto_cache
+            and request.method == "POST"
+            and is_messages_endpoint
+        ):
+            from coderag.cache_placement import apply_auto_cache
+
+            cached_body = apply_auto_cache(body)
+            if cached_body is not None:
+                body = cached_body
+                request.app.state.auto_cache_totals["requests_cached"] += 1
 
         started = time.perf_counter()
         usage = ObservedUsage()

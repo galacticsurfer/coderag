@@ -169,9 +169,52 @@ def diagnose(
             assumption=assumption,
         ))
 
+    # R7 — no cache activity at all: the client never asks for caching.
+    # Takes precedence over R2 (which is about *ineffective* caching).
+    no_cache_activity = (b.cache_read_tokens == 0 and b.cache_write_tokens == 0)
+    if (b.requests >= 5 and no_cache_activity
+            and b.fresh_input_tokens / max(b.requests, 1) > 5_000):
+        cacheable = int(b.fresh_input_tokens * 0.9)
+        saving = cacheable / 1e6 * price_in * (1 - CACHE_READ_RATE)
+        out.append(Diagnosis(
+            code="no_caching",
+            title="Prompt caching isn't being used at all",
+            evidence=(f"0 cache reads and 0 cache writes across {b.requests} "
+                      f"requests averaging "
+                      f"{b.fresh_input_tokens // max(b.requests, 1):,} "
+                      "fresh input tokens"),
+            action=("The client sends no cache_control breakpoints. Add them, or "
+                    "run `coderag proxy --auto-cache` to inject the standard "
+                    "placement (tools / system / last message) automatically."),
+            est_saving_usd=round(saving, 4),
+            assumption=("assumes 90% of fresh input is a repeated prefix that "
+                        "would bill at the 0.1x cache-read rate"),
+        ))
+
+    # R6 — cache churn: paying the 1.25x write premium for cache that is
+    # rarely read back (the prefix keeps changing between writes).
+    if (b.requests >= 5 and b.cache_write_tokens > 0
+            and b.cache_read_tokens < 0.5 * b.cache_write_tokens):
+        premium = b.cache_write_tokens / 1e6 * price_in * (CACHE_WRITE_RATE - 1.0)
+        out.append(Diagnosis(
+            code="cache_churn",
+            title="Cache writes rarely get read back",
+            evidence=(f"{b.cache_write_tokens:,} tokens written to cache at 1.25x "
+                      f"but only {b.cache_read_tokens:,} read back "
+                      f"({b.requests} requests)"),
+            action=("The cached prefix changes between requests, so each write is "
+                    "paid for and then abandoned. Stabilize the prefix (fixed "
+                    "system prompt, stable tool list, append-only history)."),
+            est_saving_usd=round(premium, 4),
+            assumption=("estimates only the recoverable 0.25x write premium; a "
+                        "stable prefix would additionally convert fresh input "
+                        "to 0.1x reads"),
+        ))
+
     # R2 — poor cache hit rate on substantial repeated traffic
     seen_input = b.fresh_input_tokens + b.cache_read_tokens
-    if (b.requests >= 5 and seen_input / max(b.requests, 1) > 10_000
+    if (b.requests >= 5 and not no_cache_activity
+            and seen_input / max(b.requests, 1) > 10_000
             and b.cache_hit_rate < 0.4):
         recoverable = int(b.fresh_input_tokens * 0.7)
         saving = recoverable / 1e6 * price_in * (1 - CACHE_READ_RATE)

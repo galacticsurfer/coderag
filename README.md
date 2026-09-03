@@ -341,6 +341,16 @@ It chains: `--upstream http://127.0.0.1:8787` forwards to another proxy (e.g. a 
 proxy) instead of the API, so you can observe *and* compress:
 `agent → coderag proxy (measure) → compression proxy → api.anthropic.com`.
 
+### Opt-in automatic cache placement (`--auto-cache`)
+
+Claude Code places its own cache breakpoints — but raw SDK scripts and many agents don't, and
+they bill an identical, growing prefix at the full input rate every turn when ~90% of it could
+bill at the 0.1× cache-read rate. `coderag proxy --auto-cache` injects the standard placement
+(last tool definition, last system block, last block of the final message) into requests that
+contain **no** `cache_control` at all; a client that manages its own caching is never touched,
+which also makes the transform idempotent. Metadata only — no prompt content is added, removed,
+or reordered. The doctor's `no_caching` detector tells you when this flag would pay for itself.
+
 ### Opt-in compression (`--compress`)
 
 ```bash
@@ -353,6 +363,11 @@ consecutive-duplicate-line dedupe, blank-line squeeze — plus recoverable elisi
 blocks: the middle is cut, the head/tail kept, and the raw original stored locally
 (`~/.coderag/proxy-cache/`, content-addressed). The marker names the key, and the agent can
 fetch the exact original back with the `coderag_expand` MCP tool.
+
+The transforms are content-aware: **error/warning/traceback lines survive elision** (up to 40,
+in original order — the point of a log is usually in those lines), **diffs are exempt from
+elision entirely** (every changed line is signal), and **oversized base64/hex blobs** are
+elided recoverably.
 
 Why the design is shaped this way:
 
@@ -416,17 +431,24 @@ two things no instruction-only approach can:
 
 ## Composes with other token-efficiency tools
 
-CodeRAG attacks **one slice** of token spend: the code you'd otherwise read whole files to get.
-It does nothing about output tokens, conversation history, cache placement, or model routing.
-Tools that target those slices stack with it, because the slices are disjoint:
+CodeRAG started on **one slice** of token spend — the code you'd otherwise read whole files to
+get — and has since grown levers for most of the others. Where the current coverage stands
+against tools like [Caveman](https://caveman.so):
 
-| Slice | Billed at | CodeRAG | Tools like [Caveman](https://caveman.so) |
+| Slice | Billed at | CodeRAG | Tools like Caveman |
 |---|---|:--:|:--:|
 | File-reading input | 1× input | ✅ retrieval instead of whole files | — |
-| Output tokens | **5× input** | ❌ | ✅ output compression |
-| Conversation history | ~0.1× (cached) | ❌ | ✅ context compression |
-| Cache placement | — | ❌ | ✅ automatic breakpoints |
+| Output tokens | **5× input** | ✅ `/token-lean` skill (effect *measured* per-workload) + opt-in `--cap-output`/`--cap-thinking` | ✅ output compression, fine-tuned models |
+| Tool output in history | 1× / 0.1× | ✅ `--compress` (deterministic, error-aware, diff-exempt, base64 elision, recoverable) | ✅ broader content-shape routers (JSON/HTML/code/prose) |
+| Cache placement | 0.1× reads | ✅ `--auto-cache` (standard breakpoints, never touches clients that already cache) | ✅ automatic breakpoints |
+| Waste diagnosis | — | ✅ `coderag doctor` (7 detectors, each with evidence + stated assumptions) | ✅ (~20 detectors) |
 | Model routing | varies | ❌ | ✅ cheapest model passing evals |
+
+Remaining honest gaps on our side: Caveman's compressors route by content shape (JSON, HTML,
+code, prose — with query-aware selection) where ours target tool-result logs/diffs/blobs; they
+ship more detectors; and we do no model routing at all. Remaining gaps on theirs: no retrieval
+(they shrink what's in the request; retrieval stops it entering), and their proxy is BSL-1.1
+where this entire stack is MIT.
 
 Savings on disjoint slices are near-additive. On a typical mid-session turn, CodeRAG's measured
 file-slice reduction works out to ~26% of cost; adding an output-compression layer takes the

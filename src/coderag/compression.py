@@ -32,6 +32,20 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07")
 _MIN_RUN = 3          # consecutive identical lines before dedupe kicks in
 _MIN_BLOCK_SAVING = 64  # chars a block must shrink by to accept the rewrite
 
+# Lines that must survive middle-elision: the whole point of a log is usually
+# in these, and they are exactly what an agent needs to act without expanding.
+_IMPORTANT_LINE_RE = re.compile(
+    r"error|warn|fail|fatal|exception|traceback|panic|assert", re.IGNORECASE
+)
+_MAX_IMPORTANT_KEPT = 40  # cap so a pathological log can't defeat elision
+
+# Diff-shaped content is exempt from elision: every changed line is signal.
+_DIFF_RE = re.compile(r"^diff --git |^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@", re.MULTILINE)
+
+# Long base64/hex runs (inline images, wheels, blobs) carry nothing an LLM
+# can use at this size; elide recoverably.
+_BASE64_RUN_RE = re.compile(r"[A-Za-z0-9+/]{2048,}={0,2}")
+
 
 @dataclass
 class CompressionStats:
@@ -122,17 +136,39 @@ def elide_middle(
     head_len = _snap_to_line(text, (keep * 2) // 3, forward=False)
     tail_start = _snap_to_line(text, len(text) - keep // 3, forward=True)
     elided = tail_start - head_len
+
+    # Errors/warnings in the elided middle survive, in original order.
+    important = [
+        line for line in text[head_len:tail_start].split("\n")
+        if _IMPORTANT_LINE_RE.search(line)
+    ][:_MAX_IMPORTANT_KEPT]
+    kept_note = f"; kept {len(important)} error/warning lines" if important else ""
     marker = (
-        f"\n[coderag: elided {elided} chars of tool output; retrieve the full "
-        f'original with the MCP tool coderag_expand("{key}")]\n'
+        f"\n[coderag: elided {elided} chars of tool output{kept_note}; retrieve "
+        f'the full original with the MCP tool coderag_expand("{key}")]\n'
     )
-    return text[:head_len] + marker + text[tail_start:]
+    middle = ("\n".join(important) + "\n") if important else ""
+    return text[:head_len] + marker + middle + text[tail_start:]
+
+
+def elide_base64_runs(text: str, directory: Path | None = None) -> str:
+    """Replace huge base64/hex runs with a recoverable marker."""
+    def repl(m: re.Match[str]) -> str:
+        key = store_original(m.group(0), directory)
+        return (f'[coderag: elided {len(m.group(0))} chars of encoded data; '
+                f'coderag_expand("{key}")]')
+
+    return _BASE64_RUN_RE.sub(repl, text)
 
 
 def compress_text(
     text: str, threshold: int, keep: int, directory: Path | None = None
 ) -> str:
+    if _DIFF_RE.search(text):
+        # Diffs are dense signal: every changed line matters. Only strip ANSI.
+        return strip_ansi(text)
     cleaned = squeeze_blank_lines(dedupe_consecutive_lines(strip_ansi(text)))
+    cleaned = elide_base64_runs(cleaned, directory)
     return elide_middle(cleaned, threshold, keep, directory, original=text)
 
 
