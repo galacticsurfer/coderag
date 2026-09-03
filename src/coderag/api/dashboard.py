@@ -239,6 +239,12 @@ function renderDoctor(d){
     `<div class="track"><div class="seg context" style="width:${100*usdv/maxUsd}%"></div></div>`+
     `<div class="bar-red">${usd(usdv)}</div></div>`).join('') + '</div>';
   html += `<p class="hint" style="margin-top:10px">total ${usd(b.total_usd)} over ${n(b.requests)} requests · cache hit rate ${(100*b.cache_hit_rate).toFixed(0)}%</p>`;
+  const se = d.skill_effect;
+  if(se && se.measured_reduction != null){
+    const pct = Math.abs(100*se.measured_reduction).toFixed(0);
+    const dir = se.measured_reduction >= 0 ? 'less' : 'more';
+    html += `<p class="hint">/token-lean effect (measured): ${n(Math.round(se.avg_output_inactive))} → ${n(Math.round(se.avg_output_active))} avg output tokens/request (${pct}% ${dir}; ${n(se.active_requests)} on / ${n(se.inactive_requests)} off; observational)</p>`;
+  }
   if(d.diagnoses.length){
     html += '<ol style="font-size:12.5px;padding-left:18px;margin:8px 0">' + d.diagnoses.map(x =>
       `<li style="margin-bottom:8px"><b>${esc(x.title)}</b>`+

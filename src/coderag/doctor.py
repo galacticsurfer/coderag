@@ -70,9 +70,50 @@ class Diagnosis:
 
 
 @dataclass
+class SkillEffect:
+    """Measured output-per-request with the /token-lean skill active vs not.
+
+    Observational, not a randomized experiment — tasks differ between groups —
+    but it replaces the doctor's *assumed* output reduction with a number from
+    the user's own traffic once both groups are big enough.
+    """
+
+    active_requests: int
+    inactive_requests: int
+    avg_output_active: float
+    avg_output_inactive: float
+
+    @property
+    def measured_reduction(self) -> float | None:
+        """Fractional output reduction when the skill is active (None if n/a)."""
+        if (self.active_requests < MIN_SKILL_GROUP
+                or self.inactive_requests < MIN_SKILL_GROUP
+                or self.avg_output_inactive <= 0):
+            return None
+        return 1.0 - self.avg_output_active / self.avg_output_inactive
+
+
+MIN_SKILL_GROUP = 5  # requests needed on each side before the comparison counts
+
+
+def skill_effect(rows: list[UsageRow]) -> SkillEffect:
+    active = [r.output_tokens or 0 for r in rows
+              if getattr(r, "token_lean_active", False)]
+    inactive = [r.output_tokens or 0 for r in rows
+                if not getattr(r, "token_lean_active", False)]
+    return SkillEffect(
+        active_requests=len(active),
+        inactive_requests=len(inactive),
+        avg_output_active=sum(active) / len(active) if active else 0.0,
+        avg_output_inactive=sum(inactive) / len(inactive) if inactive else 0.0,
+    )
+
+
+@dataclass
 class DoctorReport:
     breakdown: CostBreakdown
     diagnoses: list[Diagnosis] = field(default_factory=list)
+    skill_effect: SkillEffect | None = None
 
 
 def attribute(rows: list[UsageRow], price_in: float, price_out: float) -> CostBreakdown:
@@ -98,6 +139,7 @@ def diagnose(
     *,
     retrieval_queries: int = 0,
     ordered_total_input: list[int] | None = None,
+    measured_output_reduction: float | None = None,
 ) -> list[Diagnosis]:
     """Rule-based diagnoses, ranked by estimated $ impact (unquantified last)."""
     out: list[Diagnosis] = []
@@ -106,15 +148,25 @@ def diagnose(
     # R1 — output-dominant spend
     if total > 0 and b.output_usd / total >= 0.5:
         share = 100 * b.output_usd / total
+        if measured_output_reduction is not None and measured_output_reduction > 0:
+            reduction = measured_output_reduction
+            assumption = (f"reduction measured on your traffic "
+                          f"({100 * reduction:.0f}% with /token-lean active; "
+                          "observational, tasks differ between groups)")
+        else:
+            reduction = 0.25
+            assumption = "assumes a 25% reduction in output length; scale linearly"
         out.append(Diagnosis(
             code="output_dominant",
             title="Output tokens dominate your spend",
             evidence=(f"{b.output_tokens:,} output tokens = ${b.output_usd:.2f} "
                       f"({share:.0f}% of ${total:.2f} observed)"),
             action=("Lower `effort` one level (e.g. xhigh->high) and add terse-output "
-                    "instructions (the /token-lean skill's output rules)."),
-            est_saving_usd=round(b.output_usd * 0.25, 4),
-            assumption="assumes a 25% reduction in output length; scale linearly",
+                    "instructions (the /token-lean skill's output rules). "
+                    "Mechanical fallback: `coderag proxy --cap-output` / "
+                    "`--cap-thinking` (quality trade-off)."),
+            est_saving_usd=round(b.output_usd * reduction, 4),
+            assumption=assumption,
         ))
 
     # R2 — poor cache hit rate on substantial repeated traffic
@@ -199,13 +251,18 @@ def examine(
     ordered_total_input: list[int] | None = None,
 ) -> DoctorReport:
     b = attribute(rows, price_in, price_out)
+    effect = skill_effect(rows) if rows else None
     return DoctorReport(
         breakdown=b,
         diagnoses=diagnose(
             b, price_in, price_out,
             retrieval_queries=retrieval_queries,
             ordered_total_input=ordered_total_input,
+            measured_output_reduction=(
+                effect.measured_reduction if effect else None
+            ),
         ),
+        skill_effect=effect,
     )
 
 

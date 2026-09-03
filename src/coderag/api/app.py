@@ -372,6 +372,12 @@ def doctor_endpoint(session: Session = Depends(get_session)) -> dict:
             "cache_hit_rate": round(b.cache_hit_rate, 3),
         },
         "diagnoses": [asdict(d) for d in report.diagnoses],
+        "skill_effect": (
+            None if report.skill_effect is None else {
+                **asdict(report.skill_effect),
+                "measured_reduction": report.skill_effect.measured_reduction,
+            }
+        ),
         "note": "Estimates at configured prices from observed traffic — not billing data.",
     }
 

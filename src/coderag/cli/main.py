@@ -194,6 +194,14 @@ def proxy(
         help="Deterministically compress tool-result blocks in requests "
              "(ANSI strip, log dedupe, recoverable elision of oversized output). "
              "Off by default; originals stored in ~/.coderag/proxy-cache."),
+    cap_output: int | None = typer.Option(
+        None, "--cap-output",
+        help="QUALITY TRADE-OFF: clamp max_tokens in every request to this "
+             "value (only ever lowered). Long answers get truncated."),
+    cap_thinking: int | None = typer.Option(
+        None, "--cap-thinking",
+        help="QUALITY TRADE-OFF: clamp an explicit thinking budget_tokens to "
+             "this value (adaptive thinking is left untouched)."),
 ) -> None:
     """Run the observability proxy: forwards LLM traffic unmodified, records real
     provider-billed token usage to the dashboard.
@@ -205,6 +213,16 @@ def proxy(
     from coderag.proxy import create_app
 
     mode = "observe + compress tool results" if compress else "observe only (byte-fidelity)"
+    if cap_output is not None or cap_thinking is not None:
+        caps = ", ".join(
+            x for x in (
+                f"max_tokens<={cap_output}" if cap_output is not None else "",
+                f"thinking budget<={cap_thinking}" if cap_thinking is not None else "",
+            ) if x)
+        console.print(
+            f"[bold yellow]OUTPUT CAPS ON[/] ({caps}) — this deliberately trades "
+            "answer quality for cost: responses may be truncated and reasoning "
+            "shallower. Remove the flags to restore normal behaviour.\n")
     console.print(
         f"[green]Proxy[/] ({mode}) -> forwarding to [cyan]{upstream}[/]\n\n"
         f"  export ANTHROPIC_BASE_URL=http://{host}:{port}\n\n"
@@ -212,7 +230,8 @@ def proxy(
         "model, latency, and status are recorded — never prompts, responses, or "
         "credentials. View at the dashboard's 'Est. $ LLM spend' / LLM tiles.[/]"
     )
-    uvicorn.run(create_app(upstream, compress=compress),
+    uvicorn.run(create_app(upstream, compress=compress,
+                           cap_output=cap_output, cap_thinking=cap_thinking),
                 host=host, port=port, log_level="warning")
 
 
@@ -223,7 +242,7 @@ def doctor() -> None:
     Reads usage recorded by `coderag proxy` (and `ask`). Run the proxy for a
     while first — no observed traffic means no diagnosis.
     """
-    from coderag.doctor import examine_from_db
+    from coderag.doctor import MIN_SKILL_GROUP, examine_from_db
 
     settings = get_settings()
     with session_scope() as session:
@@ -255,7 +274,23 @@ def doctor() -> None:
     t.add_row("output", f"{b.output_tokens:,}", f"${pout}/M", f"{b.output_usd:.4f}")
     t.add_row("[bold]total[/]", "", "", f"[bold]{b.total_usd:.4f}[/]")
     console.print(t)
-    console.print(f"cache hit rate: {100 * b.cache_hit_rate:.0f}%\n")
+    console.print(f"cache hit rate: {100 * b.cache_hit_rate:.0f}%")
+
+    e = report.skill_effect
+    if e is not None and e.measured_reduction is not None:
+        arrow = "less" if e.measured_reduction >= 0 else "MORE"
+        console.print(
+            f"/token-lean effect (measured): {e.avg_output_inactive:,.0f} -> "
+            f"{e.avg_output_active:,.0f} avg output tokens/request "
+            f"({abs(100 * e.measured_reduction):.0f}% {arrow}; "
+            f"{e.active_requests} on / {e.inactive_requests} off; observational)\n")
+    elif e is not None and e.active_requests:
+        console.print(
+            f"[dim]/token-lean effect: not enough data yet "
+            f"({e.active_requests} requests with skill, "
+            f"{e.inactive_requests} without; need {MIN_SKILL_GROUP} each).[/]\n")
+    else:
+        console.print()
 
     if not report.diagnoses:
         console.print("[green]No obvious waste found in the observed window.[/] "

@@ -258,6 +258,7 @@ class LLMRequest(Base):
     # Characters of tool_result content observed in the request body (counts
     # only — content itself is never stored). Feeds the --compress diagnostic.
     tool_result_chars: Mapped[int] = mapped_column(Integer, default=0)
+    token_lean_active: Mapped[bool] = mapped_column(Boolean, default=False)
     latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
     success: Mapped[bool] = mapped_column(Boolean, default=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

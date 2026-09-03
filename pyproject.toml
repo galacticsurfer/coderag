@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 # command are both `coderag`. Plain "coderag" is taken on PyPI by an unrelated project,
 # and "code-rag" is rejected as too similar (PyPI collapses -/_/. when comparing names).
 name = "coderag-ai"
-version = "0.7.0"
+version = "0.8.0"
 description = "Token-efficient, structure-aware Code Intelligence + RAG for private source repositories."
 readme = "README.md"
 requires-python = ">=3.12"

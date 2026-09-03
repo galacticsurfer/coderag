@@ -395,6 +395,25 @@ report is on the dashboard (`/dashboard`) and as JSON at `GET /doctor`. All doll
 estimates at the configured prices (`CODERAG_PRICE_INPUT_PER_MTOK` /
 `CODERAG_PRICE_OUTPUT_PER_MTOK`), computed from observed traffic — not billing data.
 
+### The output side, measured and (optionally) capped
+
+Output tokens are billed as they are generated — nothing can compress them after the fact, so
+every "output saver" (including ours) works by influencing what the model writes. CodeRAG does
+two things no instruction-only approach can:
+
+- **It measures whether the `/token-lean` skill actually works on your traffic.** The proxy
+  flags each request where the skill is active (a byte-marker check — no content is parsed or
+  stored) and the doctor compares average output tokens/request across the two groups. Once
+  both groups have ≥5 requests, the doctor's output-savings estimate uses *your measured
+  reduction* instead of an assumption — and if the skill makes output *longer*, it says so.
+  The comparison is observational (tasks differ between groups), and is labelled as such.
+- **Mechanical caps, opt-in, loudly labelled.** `coderag proxy --cap-output N` clamps
+  `max_tokens` downward in every request; `--cap-thinking N` clamps an explicit extended-
+  thinking `budget_tokens` (adaptive thinking is never touched; nothing is ever raised or
+  invented). These are real valves, not polite notes — and they deliberately trade answer
+  quality for cost, which is why they are off by default and the CLI warns when they're on.
+  Capped-request counts are on `GET /coderag-proxy/health`.
+
 ## Composes with other token-efficiency tools
 
 CodeRAG attacks **one slice** of token spend: the code you'd otherwise read whole files to get.

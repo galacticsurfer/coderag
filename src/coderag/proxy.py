@@ -53,6 +53,7 @@ class ObservedUsage:
     cached_input_tokens: int | None = None
     cache_creation_input_tokens: int | None = None
     tool_result_chars: int = 0
+    token_lean_active: bool = False
     status_code: int = 0
     streamed: bool = False
 
@@ -72,6 +73,7 @@ def _record(usage: ObservedUsage, latency_ms: float) -> None:
                 cached_input_tokens=usage.cached_input_tokens,
                 cache_creation_input_tokens=usage.cache_creation_input_tokens,
                 tool_result_chars=usage.tool_result_chars,
+                token_lean_active=usage.token_lean_active,
                 latency_ms=latency_ms,
                 success=200 <= usage.status_code < 300,
                 error=None if 200 <= usage.status_code < 300
@@ -124,7 +126,17 @@ def _usage_from_sse_line(line: str, usage: ObservedUsage) -> None:
             usage.output_tokens = int(u["output_tokens"])
 
 
-def create_app(upstream: str = DEFAULT_UPSTREAM, compress: bool = False) -> FastAPI:
+# Marker for detecting whether the /token-lean skill is active in a request.
+# Byte search only — the body is never parsed or stored for this.
+_TOKEN_LEAN_MARKER = b"token-lean"
+
+
+def create_app(
+    upstream: str = DEFAULT_UPSTREAM,
+    compress: bool = False,
+    cap_output: int | None = None,
+    cap_thinking: int | None = None,
+) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # pragma: no cover
         yield
@@ -134,6 +146,9 @@ def create_app(upstream: str = DEFAULT_UPSTREAM, compress: bool = False) -> Fast
                   redoc_url=None, lifespan=lifespan)
     app.state.upstream = upstream
     app.state.compress = compress
+    app.state.cap_output = cap_output
+    app.state.cap_thinking = cap_thinking
+    app.state.cap_totals = {"requests_capped": 0}
     app.state.compression_totals = {
         "requests_seen": 0, "requests_compressed": 0, "chars_in": 0, "chars_saved": 0,
     }
@@ -148,6 +163,9 @@ def create_app(upstream: str = DEFAULT_UPSTREAM, compress: bool = False) -> Fast
             "upstream": upstream,
             "compress": app.state.compress,
             "compression": dict(app.state.compression_totals),
+            "cap_output": app.state.cap_output,
+            "cap_thinking": app.state.cap_thinking,
+            "caps": dict(app.state.cap_totals),
         }
 
     @app.api_route(
@@ -167,6 +185,26 @@ def create_app(upstream: str = DEFAULT_UPSTREAM, compress: bool = False) -> Fast
 
         url_path = f"/{path}"
         is_messages_endpoint = url_path.rstrip("/").endswith("/messages")
+
+        # Opt-in output caps: clamp max_tokens / thinking budget downward.
+        # A deliberate quality trade-off — off by default, guarded like
+        # compression (any failure forwards the original bytes).
+        if (
+            request.method == "POST"
+            and is_messages_endpoint
+            and (request.app.state.cap_output is not None
+                 or request.app.state.cap_thinking is not None)
+        ):
+            from coderag.output_caps import apply_output_caps
+
+            capped = apply_output_caps(
+                body,
+                max_tokens_cap=request.app.state.cap_output,
+                thinking_budget_cap=request.app.state.cap_thinking,
+            )
+            if capped is not None:
+                body = capped
+                request.app.state.cap_totals["requests_capped"] += 1
 
         # Opt-in, guarded compression of tool_result blocks in the request body.
         # Deterministic (cache-safe); any failure forwards the original bytes.
@@ -203,6 +241,7 @@ def create_app(upstream: str = DEFAULT_UPSTREAM, compress: bool = False) -> Fast
             from coderag.compression import tool_result_chars_in_body
 
             usage.tool_result_chars = tool_result_chars_in_body(original_body)
+            usage.token_lean_active = _TOKEN_LEAN_MARKER in original_body
 
         http: httpx.AsyncClient = request.app.state.client
         upstream_request = http.build_request(
