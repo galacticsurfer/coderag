@@ -7,6 +7,18 @@
 
 **Token-efficient, structure-aware Code Intelligence + RAG for private source repositories.**
 
+```bash
+# Full install — two commands, no Docker/sudo needed:
+pipx install "coderag-ai[mcp,localdb]"
+cd /path/to/your/project && coderag setup
+```
+
+That's everything: database, migrations, indexing, Claude Code MCP registration, the CLAUDE.md
+retrieval nudge, and the `/token-lean` skill. Ask Claude Code a question about your code and
+watch it retrieve symbols instead of reading whole files.
+
+**Languages:** Python, TypeScript, JavaScript, React (TSX/JSX), Go, Java, Rust.
+
 CodeRAG indexes private source-code repositories, retrieves *only the code relevant* to a
 developer's request, builds a **token-budgeted** context package, and sends it to your
 organisation's Claude endpoint (or any LLM behind the `LLMProvider` interface).
@@ -17,7 +29,8 @@ organisation's Claude endpoint (or any LLM behind the `LLMProvider` interface).
 This is **not** a generic document-RAG app:
 
 - **Chunks are code constructs** — functions/methods/classes/modules — via Tree-sitter, never
-  fixed-size text slices.
+  fixed-size text slices. Works for Python, TypeScript/JavaScript (incl. React TSX/JSX), Go,
+  Java, and Rust.
 - **Retrieval is hybrid**: exact-symbol + PostgreSQL full-text (lexical) + pgvector (semantic)
   + a lightweight one-hop code graph, fused with Reciprocal Rank Fusion.
 - **Every result explains *why*** it was retrieved (`exact_symbol`, `lexical`, `semantic`,
@@ -238,7 +251,9 @@ See [`SECURITY.md`](SECURITY.md) and [`docs/security.md`](docs/security.md).
 
 ## Limitations (MVP)
 
-- **Python only** (architecture is language-independent; other parsers are interface stubs).
+- **Language depth varies**: Python has the richest parser (docstrings, decorators,
+  self-call confidence); TS/JS/TSX, Go, Java, and Rust use a spec-driven tree-sitter parser
+  (symbols, imports, calls — no docstring extraction yet).
 - **Graph is syntax-heuristic**: only in-repo, confidently-resolved edges are stored
   (incomplete-but-correct by design). Ambiguous/external calls are dropped.
 - **Exact vector scan** (no HNSW yet — added when dataset size warrants).

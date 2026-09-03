@@ -311,8 +311,8 @@ def diagnose(
             evidence=(f"{b.output_tokens:,} output tokens = ${b.output_usd:.2f} "
                       f"({share:.0f}% of ${total:.2f} observed)"),
             action=("Lower `effort` one level (e.g. xhigh->high) and add terse-output "
-                    "instructions (the /token-lean skill's output rules). "
-                    "Mechanical fallback: `coderag proxy --cap-output` / "
+                    "instructions (/token-lean skill, or `coderag proxy --terse` "
+                    "for any client). Mechanical fallback: `--cap-output` / "
                     "`--cap-thinking` (quality trade-off)."),
             est_saving_usd=round(b.output_usd * reduction, 4),
             assumption=assumption,

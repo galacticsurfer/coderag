@@ -14,13 +14,25 @@ def _python_parser() -> LanguageParser:
     return PythonParser()
 
 
+@lru_cache
+def _treesitter_parser(language: str) -> LanguageParser | None:
+    from coderag.parsing.treesitter import SPECS, TreeSitterParser
+
+    for spec in SPECS:
+        if spec.language == language:
+            return TreeSitterParser(spec)
+    return None
+
+
 def get_parser_for_path(path: str) -> LanguageParser | None:
     from coderag.indexing.ignore import language_for_path
 
     lang = language_for_path(path)
+    if lang is None:
+        return None
     if lang == "python":
         return _python_parser()
-    return None
+    return _treesitter_parser(lang)
 
 
 def module_qualified_name(rel_path: str) -> str:
@@ -28,7 +40,7 @@ def module_qualified_name(rel_path: str) -> str:
 
     ``services/payment_service.py`` -> ``services.payment_service``
     ``services/__init__.py``        -> ``services``
-    ``main.py``                     -> ``main``
+    ``src/components/App.tsx``      -> ``src.components.App``
     """
     p = rel_path.replace("\\", "/")
     dot = p.rfind(".")

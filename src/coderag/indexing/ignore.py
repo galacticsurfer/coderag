@@ -51,6 +51,13 @@ BINARY_EXTENSIONS: frozenset[str] = frozenset(
 # extension -> language name
 LANGUAGE_BY_EXTENSION: dict[str, str] = {
     ".py": "python",
+    ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".ts": "typescript", ".mts": "typescript", ".cts": "typescript",
+    ".tsx": "tsx",
+    ".go": "go",
+    ".java": "java",
+    ".rs": "rust",
 }
 
 
