@@ -124,7 +124,7 @@ DASHBOARD_HTML = r"""<!doctype html>
 
   <section class="card">
     <h2>Doctor — where the money goes</h2>
-    <p class="hint">Attribution of observed LLM traffic (via <code>coderag proxy</code>) and the levers ranked by estimated impact. Estimates at configured prices, not billing data.</p>
+    <p class="hint">Attribution of observed LLM traffic (via <code>coderag proxy</code>) and the levers ranked by estimated impact. Estimates at published per-model prices, not billing data.</p>
     <div id="doctor" class="empty">No observed traffic yet — run <b>coderag proxy</b> and point your agent at it.</div>
   </section>
 

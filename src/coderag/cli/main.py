@@ -289,15 +289,20 @@ def doctor() -> None:
     t.add_column("tokens", justify="right")
     t.add_column("rate")
     t.add_column("$", justify="right")
-    pin = settings.price_input_per_mtok
-    pout = settings.price_output_per_mtok
-    t.add_row("fresh input", f"{b.fresh_input_tokens:,}", f"${pin}/M",
+    def rate(usd: float, tokens: int) -> str:
+        return f"${usd / tokens * 1e6:.2f}/M" if tokens else "—"
+
+    t.add_row("fresh input", f"{b.fresh_input_tokens:,}",
+              rate(b.fresh_input_usd, b.fresh_input_tokens),
               f"{b.fresh_input_usd:.4f}")
-    t.add_row("cache reads", f"{b.cache_read_tokens:,}", f"${pin * 0.1:.2f}/M",
+    t.add_row("cache reads", f"{b.cache_read_tokens:,}",
+              rate(b.cache_read_usd, b.cache_read_tokens),
               f"{b.cache_read_usd:.4f}")
-    t.add_row("cache writes", f"{b.cache_write_tokens:,}", f"${pin * 1.25:.2f}/M",
+    t.add_row("cache writes", f"{b.cache_write_tokens:,}",
+              rate(b.cache_write_usd, b.cache_write_tokens),
               f"{b.cache_write_usd:.4f}")
-    t.add_row("output", f"{b.output_tokens:,}", f"${pout}/M", f"{b.output_usd:.4f}")
+    t.add_row("output", f"{b.output_tokens:,}",
+              rate(b.output_usd, b.output_tokens), f"{b.output_usd:.4f}")
     t.add_row("[bold]total[/]", "", "", f"[bold]{b.total_usd:.4f}[/]")
     console.print(t)
     console.print(f"cache hit rate: {100 * b.cache_hit_rate:.0f}%")
@@ -332,9 +337,10 @@ def doctor() -> None:
 
     ce = report.compression
     if ce is not None and ce.requests_compressed:
+        eff_in = b.effective_input_price(settings.price_input_per_mtok)
         console.print(
             f"--compress (measured): saved ~{ce.est_tokens_saved:,} tokens "
-            f"(~${ce.est_usd_saved(settings.price_input_per_mtok):.4f}) across "
+            f"(~${ce.est_usd_saved(eff_in):.4f}) across "
             f"{ce.requests_compressed} compressed requests")
 
     cap = report.cap_effect
@@ -365,9 +371,9 @@ def doctor() -> None:
         console.print(f"   action:   {d.action}")
         console.print(f"   [dim]assumption: {d.assumption}[/]\n")
     console.print(
-        "[dim]All dollar figures are estimates at the configured prices "
-        "(CODERAG_PRICE_INPUT_PER_MTOK / _OUTPUT_PER_MTOK), computed from observed "
-        "traffic — not billing data.[/]"
+        "[dim]All dollar figures are estimates at published per-model prices "
+        "(configured CODERAG_PRICE_* only as fallback for unknown models), "
+        "computed from observed traffic — not billing data.[/]"
     )
 
 

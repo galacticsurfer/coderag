@@ -398,12 +398,14 @@ def doctor_endpoint(session: Session = Depends(get_session)) -> dict:
                 **asdict(report.compression),
                 "est_tokens_saved": report.compression.est_tokens_saved,
                 "est_usd_saved": report.compression.est_usd_saved(
-                    settings.price_input_per_mtok),
+                    report.breakdown.effective_input_price(
+                        settings.price_input_per_mtok)),
             }
         ),
         "models": [asdict(m) for m in report.models],
         "routing": None if report.routing is None else asdict(report.routing),
-        "note": "Estimates at configured prices from observed traffic — not billing data.",
+        "note": ("Estimates at published per-model prices (configured prices "
+                 "as fallback) from observed traffic — not billing data."),
     }
 
 

@@ -79,6 +79,12 @@ class CostBreakdown:
         return (self.fresh_input_usd + self.cache_read_usd
                 + self.cache_write_usd + self.output_usd)
 
+    def effective_input_price(self, fallback: float) -> float:
+        """$/Mtok actually observed for fresh input (falls back if no traffic)."""
+        if self.fresh_input_tokens:
+            return self.fresh_input_usd / self.fresh_input_tokens * 1e6
+        return fallback
+
     @property
     def cache_hit_rate(self) -> float:
         seen = self.fresh_input_tokens + self.cache_read_tokens
@@ -241,6 +247,12 @@ class DoctorReport:
 
 
 def attribute(rows: list[UsageRow], price_in: float, price_out: float) -> CostBreakdown:
+    """Price each request at its own served model's published rate.
+
+    The configured (price_in, price_out) pair is only the fallback for models
+    not in the price table — so the topline equals the by-model sum by
+    construction.
+    """
     b = CostBreakdown()
     for r in rows:
         b.requests += 1
@@ -252,10 +264,14 @@ def attribute(rows: list[UsageRow], price_in: float, price_out: float) -> CostBr
         b.tool_schema_chars += getattr(r, "tool_schema_chars", 0) or 0
         if getattr(r, "success", True) is False:
             b.failed_requests += 1
-    b.fresh_input_usd = b.fresh_input_tokens / 1e6 * price_in
-    b.cache_read_usd = b.cache_read_tokens / 1e6 * price_in * CACHE_READ_RATE
-    b.cache_write_usd = b.cache_write_tokens / 1e6 * price_in * CACHE_WRITE_RATE
-    b.output_usd = b.output_tokens / 1e6 * price_out
+        pin, pout = model_prices(
+            getattr(r, "model", None) or "unknown", (price_in, price_out))
+        b.fresh_input_usd += (r.input_tokens or 0) / 1e6 * pin
+        b.cache_read_usd += ((r.cached_input_tokens or 0) / 1e6
+                             * pin * CACHE_READ_RATE)
+        b.cache_write_usd += ((r.cache_creation_input_tokens or 0) / 1e6
+                              * pin * CACHE_WRITE_RATE)
+        b.output_usd += (r.output_tokens or 0) / 1e6 * pout
     return b
 
 
@@ -303,7 +319,8 @@ def diagnose(
     if (b.requests >= 5 and no_cache_activity
             and b.fresh_input_tokens / max(b.requests, 1) > 5_000):
         cacheable = int(b.fresh_input_tokens * 0.9)
-        saving = cacheable / 1e6 * price_in * (1 - CACHE_READ_RATE)
+        saving = (cacheable / 1e6 * b.effective_input_price(price_in)
+                  * (1 - CACHE_READ_RATE))
         out.append(Diagnosis(
             code="no_caching",
             title="Prompt caching isn't being used at all",
@@ -323,7 +340,7 @@ def diagnose(
     # rarely read back (the prefix keeps changing between writes).
     if (b.requests >= 5 and b.cache_write_tokens > 0
             and b.cache_read_tokens < 0.5 * b.cache_write_tokens):
-        premium = b.cache_write_tokens / 1e6 * price_in * (CACHE_WRITE_RATE - 1.0)
+        premium = b.cache_write_usd * (CACHE_WRITE_RATE - 1.0) / CACHE_WRITE_RATE
         out.append(Diagnosis(
             code="cache_churn",
             title="Cache writes rarely get read back",
@@ -345,7 +362,8 @@ def diagnose(
             and seen_input / max(b.requests, 1) > 10_000
             and b.cache_hit_rate < 0.4):
         recoverable = int(b.fresh_input_tokens * 0.7)
-        saving = recoverable / 1e6 * price_in * (1 - CACHE_READ_RATE)
+        saving = (recoverable / 1e6 * b.effective_input_price(price_in)
+                  * (1 - CACHE_READ_RATE))
         out.append(Diagnosis(
             code="cache_misses",
             title="Prompt cache is barely being hit",
@@ -395,7 +413,7 @@ def diagnose(
     # R5 — heavy tool output: the --compress lever
     tool_tokens = b.tool_result_chars / CHARS_PER_TOKEN
     if b.fresh_input_tokens > 0 and tool_tokens / b.fresh_input_tokens >= 0.2:
-        saving = tool_tokens * 0.3 / 1e6 * price_in
+        saving = tool_tokens * 0.3 / 1e6 * b.effective_input_price(price_in)
         out.append(Diagnosis(
             code="tool_output_heavy",
             title="Tool output is a large share of fresh input",
