@@ -312,6 +312,12 @@ function renderDoctor(d){
   if(ce && ce.requests_compressed){
     html += `<p class="hint">--compress (measured): saved ${n(ce.est_tokens_saved)} tokens (~${usd(ce.est_usd_saved)}) across ${n(ce.requests_compressed)} compressed requests</p>`;
   }
+  const te = d.terse_effect;
+  if(te && te.measured_reduction != null && te.active_requests){
+    const pct = Math.abs(100*te.measured_reduction).toFixed(0);
+    const dir = te.measured_reduction >= 0 ? 'less' : 'more';
+    html += `<p class="hint">--terse (measured): ${n(Math.round(te.avg_output_inactive))} → ${n(Math.round(te.avg_output_active))} avg output tokens/request (${pct}% ${dir}; ${n(te.active_requests)} terse / ${n(te.inactive_requests)} not; observational)</p>`;
+  }
   const cape = d.cap_effect;
   if(cape && cape.measured_reduction != null && cape.active_requests){
     const pct = Math.abs(100*cape.measured_reduction).toFixed(0);

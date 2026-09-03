@@ -263,6 +263,7 @@ class LLMRequest(Base):
     compression_chars_saved: Mapped[int] = mapped_column(Integer, default=0)
     cap_applied: Mapped[bool] = mapped_column(Boolean, default=False)
     auto_cache_applied: Mapped[bool] = mapped_column(Boolean, default=False)
+    terse_applied: Mapped[bool] = mapped_column(Boolean, default=False)
     tool_schema_chars: Mapped[int] = mapped_column(Integer, default=0)
     latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
     success: Mapped[bool] = mapped_column(Boolean, default=True)

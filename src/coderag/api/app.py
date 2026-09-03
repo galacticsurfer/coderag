@@ -387,6 +387,12 @@ def doctor_endpoint(session: Session = Depends(get_session)) -> dict:
                 "measured_reduction": report.skill_effect.measured_reduction,
             }
         ),
+        "terse_effect": (
+            None if report.terse_effect is None else {
+                **asdict(report.terse_effect),
+                "measured_reduction": report.terse_effect.measured_reduction,
+            }
+        ),
         "cap_effect": (
             None if report.cap_effect is None else {
                 **asdict(report.cap_effect),

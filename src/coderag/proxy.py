@@ -59,6 +59,7 @@ class ObservedUsage:
     compression_chars_saved: int = 0
     cap_applied: bool = False
     auto_cache_applied: bool = False
+    terse_applied: bool = False
     status_code: int = 0
     streamed: bool = False
 
@@ -84,6 +85,7 @@ def _record(usage: ObservedUsage, latency_ms: float) -> None:
                 compression_chars_saved=usage.compression_chars_saved,
                 cap_applied=usage.cap_applied,
                 auto_cache_applied=usage.auto_cache_applied,
+                terse_applied=usage.terse_applied,
                 latency_ms=latency_ms,
                 success=200 <= usage.status_code < 300,
                 error=None if 200 <= usage.status_code < 300
@@ -148,6 +150,7 @@ def create_app(
     cap_thinking: int | None = None,
     auto_cache: bool = False,
     routes: dict[str, str] | None = None,
+    terse: bool = False,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # pragma: no cover
@@ -165,6 +168,8 @@ def create_app(
     app.state.auto_cache_totals = {"requests_cached": 0}
     app.state.routes = dict(routes or {})
     app.state.route_totals = {"requests_routed": 0}
+    app.state.terse = terse
+    app.state.terse_totals = {"requests_tersed": 0}
     app.state.compression_totals = {
         "requests_seen": 0, "requests_compressed": 0, "chars_in": 0, "chars_saved": 0,
     }
@@ -186,6 +191,8 @@ def create_app(
             "auto_cache_totals": dict(app.state.auto_cache_totals),
             "routes": dict(app.state.routes),
             "route_totals": dict(app.state.route_totals),
+            "terse": app.state.terse,
+            "terse_totals": dict(app.state.terse_totals),
         }
 
     @app.api_route(
@@ -243,6 +250,21 @@ def create_app(
                 body = capped
                 usage.cap_applied = True
                 request.app.state.cap_totals["requests_capped"] += 1
+
+        # Opt-in terse-output injection: append the fixed output-discipline
+        # instruction to the system prompt (idempotent, cache-safe constant).
+        if (
+            request.app.state.terse
+            and request.method == "POST"
+            and is_messages_endpoint
+        ):
+            from coderag.terse import apply_terse
+
+            tersed = apply_terse(body)
+            if tersed is not None:
+                body = tersed
+                usage.terse_applied = True
+                request.app.state.terse_totals["requests_tersed"] += 1
 
         # Opt-in, guarded compression of tool_result blocks in the request body.
         # Deterministic (cache-safe); any failure forwards the original bytes.

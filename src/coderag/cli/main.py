@@ -212,6 +212,11 @@ def proxy(
         help="QUALITY TRADE-OFF: rewrite an exact model ID, e.g. "
              "--route claude-opus-4-8=claude-sonnet-5 (repeatable). The "
              "doctor then reports measured routing savings."),
+    terse: bool = typer.Option(
+        False, "--terse",
+        help="Append fixed terse-output rules to every request's system "
+             "prompt (cache-safe, idempotent). Works for any client; effect "
+             "measured by the doctor."),
 ) -> None:
     """Run the observability proxy: forwards LLM traffic unmodified, records real
     provider-billed token usage to the dashboard.
@@ -238,6 +243,8 @@ def proxy(
     mode = "observe + compress tool results" if compress else "observe only (byte-fidelity)"
     if auto_cache:
         mode += " + auto-cache"
+    if terse:
+        mode += " + terse"
     if cap_output is not None or cap_thinking is not None:
         caps = ", ".join(
             x for x in (
@@ -257,7 +264,7 @@ def proxy(
     )
     uvicorn.run(create_app(upstream, compress=compress,
                            cap_output=cap_output, cap_thinking=cap_thinking,
-                           auto_cache=auto_cache, routes=routes),
+                           auto_cache=auto_cache, routes=routes, terse=terse),
                 host=host, port=port, log_level="warning")
 
 
@@ -351,6 +358,16 @@ def doctor() -> None:
             f"{cap.avg_output_active:,.0f} avg output tokens/request "
             f"({abs(100 * cap.measured_reduction):.0f}% {arrow}; "
             f"{cap.active_requests} capped / {cap.inactive_requests} uncapped; "
+            "observational)")
+
+    te = report.terse_effect
+    if te is not None and te.measured_reduction is not None and te.active_requests:
+        arrow = "less" if te.measured_reduction >= 0 else "MORE"
+        console.print(
+            f"--terse (measured): {te.avg_output_inactive:,.0f} -> "
+            f"{te.avg_output_active:,.0f} avg output tokens/request "
+            f"({abs(100 * te.measured_reduction):.0f}% {arrow}; "
+            f"{te.active_requests} terse / {te.inactive_requests} not; "
             "observational)")
 
     rt = report.routing

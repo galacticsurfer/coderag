@@ -149,6 +149,10 @@ def cap_effect(rows: list[UsageRow]) -> SkillEffect:
     return _output_by_flag(rows, "cap_applied")
 
 
+def terse_effect(rows: list[UsageRow]) -> SkillEffect:
+    return _output_by_flag(rows, "terse_applied")
+
+
 @dataclass
 class CompressionEffect:
     """Measured --compress savings, persisted per request by the proxy."""
@@ -241,6 +245,7 @@ class DoctorReport:
     diagnoses: list[Diagnosis] = field(default_factory=list)
     skill_effect: SkillEffect | None = None
     cap_effect: SkillEffect | None = None
+    terse_effect: SkillEffect | None = None
     compression: CompressionEffect | None = None
     models: list[ModelSpend] = field(default_factory=list)
     routing: RoutingSavings | None = None
@@ -509,6 +514,7 @@ def examine(
         ),
         skill_effect=effect,
         cap_effect=cap_effect(rows) if rows else None,
+        terse_effect=terse_effect(rows) if rows else None,
         compression=compression_effect(rows) if rows else None,
         models=mix,
         routing=routing_savings(rows) if rows else None,

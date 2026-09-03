@@ -438,6 +438,14 @@ per request, survives proxy restarts), `--route` savings at published price diff
 `/token-lean` skill's output effect, and the output caps' effect (capped vs uncapped
 requests, observational).
 
+### Terse output for any client (`--terse`)
+
+The `/token-lean` skill only reaches Claude Code sessions that installed it. `coderag proxy
+--terse` makes the same output discipline client-agnostic: a fixed instruction block is
+appended to every request's system prompt (deterministic, idempotent, cache-safe — it becomes
+part of the cached prefix). The proxy flags each affected request, so the doctor reports the
+**measured** terse-vs-not output difference instead of assuming one.
+
 ### The output side, measured and (optionally) capped
 
 Output tokens are billed as they are generated — nothing can compress them after the fact, so
