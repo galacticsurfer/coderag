@@ -51,15 +51,51 @@ DASHBOARD_HTML = r"""<!doctype html>
   button{font:inherit;font-size:13px;color:var(--ink2);background:var(--surface);
     border:1px solid var(--ring);border-radius:8px;padding:6px 12px;cursor:pointer}
   button:hover{color:var(--ink);border-color:var(--muted)}
-  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:12px;
-    margin-bottom:26px}
-  .tile{background:var(--surface);border:1px solid var(--ring);border-radius:12px;
-    padding:14px 16px;box-shadow:var(--shadow)}
-  .tile .label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
-  .tile .val{font-size:26px;margin-top:6px;font-variant-numeric:tabular-nums;
-    letter-spacing:-.02em}
-  .tile .unit{font-size:13px;color:var(--ink2);margin-left:3px}
-  .tile.hero .val{color:var(--saved-ink)}
+  .kpis{margin-bottom:26px}
+  .hero-card{position:relative;overflow:hidden;background:var(--surface);
+    border:1px solid var(--ring);border-radius:16px;box-shadow:var(--shadow);
+    padding:22px 24px 20px;margin-bottom:14px;
+    display:flex;gap:28px;align-items:center;flex-wrap:wrap}
+  .hero-card::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;
+    background:linear-gradient(90deg,var(--saved) 0%,var(--context) 100%)}
+  .hero-main{flex:1 1 300px;min-width:260px}
+  .hero-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;
+    color:var(--muted);margin-bottom:6px}
+  .hero-num{font-size:46px;line-height:1.05;font-weight:650;letter-spacing:-.03em;
+    color:var(--saved-ink);font-variant-numeric:tabular-nums}
+  .hero-num .unit{font-size:16px;font-weight:500;color:var(--ink2);margin-left:6px}
+  .hero-chips{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px;font-size:13px;
+    color:var(--ink2)}
+  .hero-chips b{color:var(--ink);font-variant-numeric:tabular-nums;font-weight:600}
+  .hero-chips .chip{display:inline-flex;align-items:center;gap:6px}
+  .hero-chips .chip i{width:8px;height:8px;border-radius:3px;display:inline-block}
+  .hero-viz{flex:1 1 260px;min-width:240px;max-width:420px}
+  .hero-viz .viz-cap{display:flex;justify-content:space-between;font-size:11px;
+    color:var(--muted);margin-bottom:6px}
+  .hero-track{display:flex;height:22px;border-radius:7px;overflow:hidden;
+    background:var(--track)}
+  .hero-track .hseg{height:100%}
+  .hero-track .hseg.sent{background:var(--context)}
+  .hero-track .hseg.saved{background:var(--saved);margin-left:2px}
+  .hero-viz .viz-note{font-size:11.5px;color:var(--muted);margin-top:6px}
+  .clusters{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+    gap:12px}
+  .cluster{background:var(--surface);border:1px solid var(--ring);border-radius:14px;
+    padding:14px 16px 10px;box-shadow:var(--shadow);
+    transition:transform .12s ease, border-color .12s ease}
+  .cluster:hover{transform:translateY(-1px);border-color:var(--muted)}
+  .cluster h3{margin:0 0 8px;font-size:11px;text-transform:uppercase;
+    letter-spacing:.08em;color:var(--muted);font-weight:600;
+    display:flex;align-items:center;gap:7px}
+  .cluster h3 i{width:7px;height:7px;border-radius:50%;display:inline-block}
+  .stat{display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+    padding:7px 0;border-top:1px dashed var(--grid);font-size:13px}
+  .stat:first-of-type{border-top:0}
+  .stat .k{color:var(--ink2)}
+  .stat .v{font-variant-numeric:tabular-nums;font-weight:600;color:var(--ink);
+    white-space:nowrap}
+  .stat .v small{font-weight:400;color:var(--muted);margin-left:4px}
+  .stat .v.good{color:var(--saved-ink)}
   .card{background:var(--surface);border:1px solid var(--ring);border-radius:12px;
     padding:18px 18px 8px;box-shadow:var(--shadow);margin-bottom:24px}
   .card h2{font-size:14px;margin:0 0 2px}
@@ -154,27 +190,55 @@ const pct = x => (x==null? "—" : Number(x).toFixed(1) + "%");
 const usd = x => (x==null? "—" : "$" + Number(x).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}));
 const esc = s => (s||"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
-function tile(label, val, unit, hero){
-  return `<div class="tile ${hero?'hero':''}"><div class="label">${label}</div>`+
-         `<div class="val">${val}${unit?`<span class="unit">${unit}</span>`:''}</div></div>`;
+function stat(k, v, extra, good){
+  return `<div class="stat"><span class="k">${k}</span>`+
+         `<span class="v ${good?'good':''}">${v}${extra?`<small>${extra}</small>`:''}</span></div>`;
 }
 
 function renderKpis(m){
-  document.getElementById('kpis').innerHTML =
-    tile('Saved vs reading files', n(m.total_saved_vs_files), 'tok', true) +
-    tile('Est. $ saved', usd(m.cost_saved_vs_files_usd), '', true) +
-    tile('Reduction vs files', pct(m.reduction_vs_files_percent), '', true) +
-    tile('Est. $ context sent', usd(m.cost_context_sent_usd)) +
-    tile('Est. $ LLM spend', usd(m.cost_llm_usd)) +
-    tile('Whole-file baseline', n(m.total_baseline_tokens), 'tok') +
-    tile('Tokens saved (budgeting)', n(m.total_tokens_saved)) +
-    tile('Overall reduction', pct(m.avg_token_reduction_percent)) +
-    tile('Queries', n(m.queries)) +
-    tile('Context sent', n(m.total_context_tokens), 'tok') +
-    tile('Candidate tokens', n(m.total_candidate_tokens), 'tok') +
-    tile('Avg retrieval', n(m.avg_retrieval_latency_ms), 'ms') +
-    tile('LLM input', n(m.total_llm_input_tokens), 'tok') +
-    tile('LLM output', n(m.total_llm_output_tokens), 'tok');
+  const baseline = m.total_baseline_tokens || 0;
+  const saved = m.total_saved_vs_files || 0;
+  const sent = Math.max(baseline - saved, 0);
+  const sentPct = baseline ? (100 * sent / baseline) : 0;
+  const savedPct = baseline ? (100 * saved / baseline) : 0;
+  const viz = baseline ? `
+    <div class="hero-viz">
+      <div class="viz-cap"><span>whole files: ${n(baseline)} tok</span><span>&rarr; sent: ${n(sent)} tok</span></div>
+      <div class="hero-track">
+        <div class="hseg sent" style="width:${sentPct}%"></div>
+        <div class="hseg saved" style="width:${Math.max(savedPct-0.5,0)}%"></div>
+      </div>
+      <div class="viz-note">what reading whole files would have cost vs what retrieval actually sent</div>
+    </div>` : '';
+  document.getElementById('kpis').innerHTML = `
+  <div class="hero-card">
+    <div class="hero-main">
+      <div class="hero-label">Tokens saved vs reading whole files</div>
+      <div class="hero-num">${n(m.total_saved_vs_files)}<span class="unit">tok &asymp; ${usd(m.cost_saved_vs_files_usd)}</span></div>
+      <div class="hero-chips">
+        <span class="chip"><i style="background:var(--saved)"></i><b>${pct(m.reduction_vs_files_percent)}</b>&nbsp;smaller than whole files</span>
+        <span class="chip"><i style="background:var(--context)"></i><b>${pct(m.avg_token_reduction_percent)}</b>&nbsp;reduction incl. budgeting</span>
+        <span class="chip"><b>${n(m.queries)}</b>&nbsp;queries</span>
+      </div>
+    </div>${viz}
+  </div>
+  <div class="clusters">
+    <div class="cluster"><h3><i style="background:var(--context)"></i>Retrieval</h3>
+      ${stat('Context sent', n(m.total_context_tokens)+' tok', usd(m.cost_context_sent_usd))}
+      ${stat('Candidate pool', n(m.total_candidate_tokens)+' tok')}
+      ${stat('Avg retrieval', n(m.avg_retrieval_latency_ms)+' ms')}
+    </div>
+    <div class="cluster"><h3><i style="background:var(--saved)"></i>Versus whole files</h3>
+      ${stat('Whole-file baseline', n(m.total_baseline_tokens)+' tok')}
+      ${stat('Saved by budgeting', n(m.total_tokens_saved)+' tok', '', true)}
+      ${stat('Saved vs files', n(m.total_saved_vs_files)+' tok', '', true)}
+    </div>
+    <div class="cluster"><h3><i style="background:var(--muted)"></i>Observed LLM (proxy)</h3>
+      ${stat('Fresh input', n(m.total_llm_input_tokens)+' tok')}
+      ${stat('Output', n(m.total_llm_output_tokens)+' tok')}
+      ${stat('Est. spend', usd(m.cost_llm_usd))}
+    </div>
+  </div>`;
 }
 
 function renderBars(rows){
@@ -238,7 +302,7 @@ function renderDoctor(d){
   let html = '<div class="bars">' + cat.map(([name,tok,usdv]) =>
     `<div class="bar-row"><div class="bar-lbl">${name}</div>`+
     `<div class="track"><div class="seg context" style="width:${100*usdv/maxUsd}%"></div></div>`+
-    `<div class="bar-red">${usd(usdv)}</div></div>`).join('') + '</div>';
+    `<div class="bar-red" style="color:var(--ink)">${usd(usdv)}</div></div>`).join('') + '</div>';
   html += `<p class="hint" style="margin-top:10px">total ${usd(b.total_usd)} over ${n(b.requests)} requests · cache hit rate ${(100*b.cache_hit_rate).toFixed(0)}%</p>`;
   if(d.models && d.models.length > 1){
     html += '<p class="hint">by model: ' + d.models.map(m =>
