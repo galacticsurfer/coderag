@@ -378,6 +378,8 @@ def doctor_endpoint(session: Session = Depends(get_session)) -> dict:
                 "measured_reduction": report.skill_effect.measured_reduction,
             }
         ),
+        "models": [asdict(m) for m in report.models],
+        "routing": None if report.routing is None else asdict(report.routing),
         "note": "Estimates at configured prices from observed traffic — not billing data.",
     }
 

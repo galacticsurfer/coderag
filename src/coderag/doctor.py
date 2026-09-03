@@ -23,6 +23,30 @@ CACHE_READ_RATE = 0.10
 CACHE_WRITE_RATE = 1.25
 CHARS_PER_TOKEN = 4.0  # heuristic, for the tool_result-share estimate only
 
+# Published list prices ($ per Mtok input, output). Longest-prefix matched so
+# date-suffixed IDs resolve; unknown models fall back to the configured prices.
+MODEL_PRICES: dict[str, tuple[float, float]] = {
+    "claude-fable-5": (10.0, 50.0),
+    "claude-opus-4-8": (5.0, 25.0),
+    "claude-opus-4-7": (5.0, 25.0),
+    "claude-opus-4-6": (5.0, 25.0),
+    "claude-sonnet-5": (3.0, 15.0),
+    "claude-sonnet-4-6": (3.0, 15.0),
+    "claude-haiku-4-5": (1.0, 5.0),
+}
+
+
+def lookup_model_prices(model: str) -> tuple[float, float] | None:
+    best = ""
+    for prefix in MODEL_PRICES:
+        if model.startswith(prefix) and len(prefix) > len(best):
+            best = prefix
+    return MODEL_PRICES[best] if best else None
+
+
+def model_prices(model: str, fallback: tuple[float, float]) -> tuple[float, float]:
+    return lookup_model_prices(model) or fallback
+
 
 class UsageRow(Protocol):
     """The slice of an llm_requests row the doctor needs."""
@@ -42,6 +66,8 @@ class CostBreakdown:
     cache_write_tokens: int = 0
     output_tokens: int = 0
     tool_result_chars: int = 0
+    tool_schema_chars: int = 0
+    failed_requests: int = 0
 
     fresh_input_usd: float = 0.0
     cache_read_usd: float = 0.0
@@ -110,10 +136,73 @@ def skill_effect(rows: list[UsageRow]) -> SkillEffect:
 
 
 @dataclass
+class ModelSpend:
+    model: str
+    requests: int = 0
+    fresh_input_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    output_tokens: int = 0
+    est_usd: float = 0.0
+
+
+def _row_usd(r: UsageRow, pin: float, pout: float) -> float:
+    return ((r.input_tokens or 0) / 1e6 * pin
+            + (r.cached_input_tokens or 0) / 1e6 * pin * CACHE_READ_RATE
+            + (r.cache_creation_input_tokens or 0) / 1e6 * pin * CACHE_WRITE_RATE
+            + (r.output_tokens or 0) / 1e6 * pout)
+
+
+def model_mix(
+    rows: list[UsageRow], fallback: tuple[float, float]
+) -> list[ModelSpend]:
+    """Spend per served model at published per-model prices, biggest first."""
+    by_model: dict[str, ModelSpend] = {}
+    for r in rows:
+        name = getattr(r, "model", None) or "unknown"
+        m = by_model.setdefault(name, ModelSpend(model=name))
+        m.requests += 1
+        m.fresh_input_tokens += r.input_tokens or 0
+        m.cache_read_tokens += r.cached_input_tokens or 0
+        m.cache_write_tokens += r.cache_creation_input_tokens or 0
+        m.output_tokens += r.output_tokens or 0
+        m.est_usd += _row_usd(r, *model_prices(name, fallback))
+    return sorted(by_model.values(), key=lambda m: (-m.est_usd, m.model))
+
+
+@dataclass
+class RoutingSavings:
+    """Measured effect of `coderag proxy --route`: tokens x price difference."""
+
+    routed_requests: int = 0
+    saved_usd: float = 0.0
+    unpriced_requests: int = 0  # routed, but a model wasn't in the price table
+
+
+def routing_savings(rows: list[UsageRow]) -> RoutingSavings:
+    out = RoutingSavings()
+    for r in rows:
+        requested = getattr(r, "requested_model", None)
+        served = getattr(r, "model", None) or ""
+        if not requested or requested == served:
+            continue
+        out.routed_requests += 1
+        req_p = lookup_model_prices(requested)
+        srv_p = lookup_model_prices(served)
+        if req_p is None or srv_p is None:
+            out.unpriced_requests += 1
+            continue
+        out.saved_usd += _row_usd(r, *req_p) - _row_usd(r, *srv_p)
+    return out
+
+
+@dataclass
 class DoctorReport:
     breakdown: CostBreakdown
     diagnoses: list[Diagnosis] = field(default_factory=list)
     skill_effect: SkillEffect | None = None
+    models: list[ModelSpend] = field(default_factory=list)
+    routing: RoutingSavings | None = None
 
 
 def attribute(rows: list[UsageRow], price_in: float, price_out: float) -> CostBreakdown:
@@ -125,6 +214,9 @@ def attribute(rows: list[UsageRow], price_in: float, price_out: float) -> CostBr
         b.cache_write_tokens += r.cache_creation_input_tokens or 0
         b.output_tokens += r.output_tokens or 0
         b.tool_result_chars += getattr(r, "tool_result_chars", 0) or 0
+        b.tool_schema_chars += getattr(r, "tool_schema_chars", 0) or 0
+        if getattr(r, "success", True) is False:
+            b.failed_requests += 1
     b.fresh_input_usd = b.fresh_input_tokens / 1e6 * price_in
     b.cache_read_usd = b.cache_read_tokens / 1e6 * price_in * CACHE_READ_RATE
     b.cache_write_usd = b.cache_write_tokens / 1e6 * price_in * CACHE_WRITE_RATE
@@ -140,6 +232,7 @@ def diagnose(
     retrieval_queries: int = 0,
     ordered_total_input: list[int] | None = None,
     measured_output_reduction: float | None = None,
+    models: list[ModelSpend] | None = None,
 ) -> list[Diagnosis]:
     """Rule-based diagnoses, ranked by estimated $ impact (unquantified last)."""
     out: list[Diagnosis] = []
@@ -281,6 +374,60 @@ def diagnose(
                        "verify on /coderag-proxy/health",
         ))
 
+    # R8 — everything runs on the most expensive tier
+    mix = models or []
+    if mix and b.requests >= 20:
+        top = mix[0]
+        top_share = top.est_usd / max(sum(m.est_usd for m in mix), 1e-9)
+        top_prices = lookup_model_prices(top.model)
+        if top_share >= 0.9 and top_prices is not None and top_prices[0] >= 5.0:
+            out.append(Diagnosis(
+                code="expensive_model_dominant",
+                title=f"~all spend runs on {top.model}",
+                evidence=(f"{top.requests} of {b.requests} requests on "
+                          f"{top.model} = ${top.est_usd:.2f} "
+                          f"({100 * top_share:.0f}% of est. spend)"),
+                action=("If part of this traffic is simple (classification, "
+                        "formatting, subagent chores), route it explicitly: "
+                        "`coderag proxy --route "
+                        f"{top.model}=claude-sonnet-5` — then check quality "
+                        "and the doctor's measured routing savings."),
+                est_saving_usd=None,
+                assumption=("saving depends on how much traffic tolerates a "
+                            "cheaper model; routing effect is measured once "
+                            "you enable it"),
+            ))
+
+    # R9 — tool definitions are a big slice of every request
+    schema_tokens = b.tool_schema_chars / CHARS_PER_TOKEN
+    if b.requests >= 10 and schema_tokens / max(b.requests, 1) >= 2_000:
+        out.append(Diagnosis(
+            code="tool_schema_heavy",
+            title="Tool definitions are large on every request",
+            evidence=(f"~{int(schema_tokens / max(b.requests, 1)):,} tokens of "
+                      f"tool schemas per request across {b.requests} requests"),
+            action=("Make sure the tool list is stable and sits in the cached "
+                    "prefix (it then bills at 0.1x), or trim tool "
+                    "descriptions / drop unused tools."),
+            est_saving_usd=None,
+            assumption=("schemas that already cache cost little; the win is "
+                        "in stabilizing or shrinking them"),
+        ))
+
+    # R10 — repeated failures suggest a config/rate-limit problem
+    if b.failed_requests >= 3 and b.failed_requests / max(b.requests, 1) >= 0.2:
+        out.append(Diagnosis(
+            code="retry_storm",
+            title="A large share of requests are failing",
+            evidence=(f"{b.failed_requests} of {b.requests} observed requests "
+                      "returned a non-2xx status"),
+            action=("Check rate limits, the upstream/base URL, and auth. "
+                    "Failed requests waste latency and retries even where "
+                    "they don't bill."),
+            est_saving_usd=None,
+            assumption="no dollar figure: failed requests are typically not billed",
+        ))
+
     out.sort(key=lambda d: (d.est_saving_usd is None, -(d.est_saving_usd or 0)))
     return out
 
@@ -295,6 +442,7 @@ def examine(
 ) -> DoctorReport:
     b = attribute(rows, price_in, price_out)
     effect = skill_effect(rows) if rows else None
+    mix = model_mix(rows, (price_in, price_out))
     return DoctorReport(
         breakdown=b,
         diagnoses=diagnose(
@@ -304,8 +452,11 @@ def examine(
             measured_output_reduction=(
                 effect.measured_reduction if effect else None
             ),
+            models=mix,
         ),
         skill_effect=effect,
+        models=mix,
+        routing=routing_savings(rows) if rows else None,
     )
 
 

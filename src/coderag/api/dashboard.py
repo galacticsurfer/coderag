@@ -239,6 +239,14 @@ function renderDoctor(d){
     `<div class="track"><div class="seg context" style="width:${100*usdv/maxUsd}%"></div></div>`+
     `<div class="bar-red">${usd(usdv)}</div></div>`).join('') + '</div>';
   html += `<p class="hint" style="margin-top:10px">total ${usd(b.total_usd)} over ${n(b.requests)} requests · cache hit rate ${(100*b.cache_hit_rate).toFixed(0)}%</p>`;
+  if(d.models && d.models.length > 1){
+    html += '<p class="hint">by model: ' + d.models.map(m =>
+      `${esc(m.model)} ${usd(m.est_usd)} (${n(m.requests)} req)`).join(' · ') + '</p>';
+  }
+  const rt = d.routing;
+  if(rt && rt.routed_requests){
+    html += `<p class="hint">routing savings (measured): <b>${usd(rt.saved_usd)}</b> across ${n(rt.routed_requests)} routed requests</p>`;
+  }
   const se = d.skill_effect;
   if(se && se.measured_reduction != null){
     const pct = Math.abs(100*se.measured_reduction).toFixed(0);

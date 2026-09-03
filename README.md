@@ -351,6 +351,21 @@ contain **no** `cache_control` at all; a client that manages its own caching is 
 which also makes the transform idempotent. Metadata only — no prompt content is added, removed,
 or reordered. The doctor's `no_caching` detector tells you when this flag would pay for itself.
 
+### Opt-in model routing (`--route`)
+
+```bash
+coderag proxy --route claude-opus-4-8=claude-sonnet-5     # repeatable
+```
+
+The bluntest cost lever there is — a cheaper model is cheaper on every token — and the most
+dangerous, because it changes answer quality more than any compressor. So the policy is
+deliberately dumb: **you** name explicit `source=destination` pairs, the proxy rewrites exact
+model-ID matches, and nothing else happens. No heuristics guessing task difficulty, no
+automatic downgrades, off by default, loud warning when on. The proxy records the originally
+requested model alongside the served one, so `coderag doctor` reports **measured** routing
+savings (token counts x the published price difference) — and the `expensive_model_dominant`
+detector tells you when routing is worth trying at all.
+
 ### Opt-in compression (`--compress`)
 
 ```bash
@@ -364,10 +379,12 @@ blocks: the middle is cut, the head/tail kept, and the raw original stored local
 (`~/.coderag/proxy-cache/`, content-addressed). The marker names the key, and the agent can
 fetch the exact original back with the `coderag_expand` MCP tool.
 
-The transforms are content-aware: **error/warning/traceback lines survive elision** (up to 40,
-in original order — the point of a log is usually in those lines), **diffs are exempt from
-elision entirely** (every changed line is signal), and **oversized base64/hex blobs** are
-elided recoverably.
+The transforms are content-aware and route by shape: **JSON tool results** get a
+structure-preserving compressor (every object key survives, error-ish subtrees are never
+shrunk, long arrays keep their edges, long strings truncate); **error/warning/traceback lines
+survive elision** in logs (up to 40, in original order); **diffs are exempt from elision
+entirely** (every changed line is signal); **oversized base64/hex blobs** are elided
+recoverably. Everything stays deterministic and byte-exact recoverable.
 
 Why the design is shaped this way:
 
@@ -439,16 +456,19 @@ against tools like [Caveman](https://caveman.so):
 |---|---|:--:|:--:|
 | File-reading input | 1× input | ✅ retrieval instead of whole files | — |
 | Output tokens | **5× input** | ✅ `/token-lean` skill (effect *measured* per-workload) + opt-in `--cap-output`/`--cap-thinking` | ✅ output compression, fine-tuned models |
-| Tool output in history | 1× / 0.1× | ✅ `--compress` (deterministic, error-aware, diff-exempt, base64 elision, recoverable) | ✅ broader content-shape routers (JSON/HTML/code/prose) |
+| Tool output in history | 1× / 0.1× | ✅ `--compress` (JSON/log/diff-aware, deterministic, recoverable) | ✅ more content shapes (HTML/code/prose, query-aware selection) |
 | Cache placement | 0.1× reads | ✅ `--auto-cache` (standard breakpoints, never touches clients that already cache) | ✅ automatic breakpoints |
-| Waste diagnosis | — | ✅ `coderag doctor` (7 detectors, each with evidence + stated assumptions) | ✅ (~20 detectors) |
-| Model routing | varies | ❌ | ✅ cheapest model passing evals |
+| Waste diagnosis | — | ✅ `coderag doctor` (10 detectors, each with evidence + stated assumptions) | ✅ (~20 detectors) |
+| Model routing | varies | ✅ explicit `--route` pairs + **measured** savings | ✅ cheapest model passing evals |
 
-Remaining honest gaps on our side: Caveman's compressors route by content shape (JSON, HTML,
-code, prose — with query-aware selection) where ours target tool-result logs/diffs/blobs; they
-ship more detectors; and we do no model routing at all. Remaining gaps on theirs: no retrieval
-(they shrink what's in the request; retrieval stops it entering), and their proxy is BSL-1.1
-where this entire stack is MIT.
+Remaining honest gaps on our side: Caveman still routes more content shapes (HTML, code,
+prose, with BM25 query-aware selection — lower value for coding-agent traffic, which is mostly
+logs/JSON/diffs), ships ~20 detectors to our 10, and its routing picks models automatically
+via evals where ours requires the user to name pairs (a deliberate choice: automatic
+downgrades gamble with quality; explicit pairs + measured savings don't). Remaining gaps on
+theirs: no retrieval (they shrink what's in the request; retrieval stops it entering), no
+per-workload measured skill/routing effects, and their proxy is BSL-1.1 where this entire
+stack is MIT.
 
 Savings on disjoint slices are near-additive. On a typical mid-session turn, CodeRAG's measured
 file-slice reduction works out to ~26% of cost; adding an output-compression layer takes the

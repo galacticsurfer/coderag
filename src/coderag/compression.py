@@ -161,15 +161,90 @@ def elide_base64_runs(text: str, directory: Path | None = None) -> str:
     return _BASE64_RUN_RE.sub(repl, text)
 
 
+# ---- JSON content-shape compressor ------------------------------------------
+
+_ERRORISH_KEY_RE = re.compile(
+    r"error|errors|warning|warnings|message|failure|failed|traceback|stderr|"
+    r"status|detail", re.IGNORECASE
+)
+_JSON_MAX_STRING = 400   # chars a leaf string may keep outside error subtrees
+_JSON_ARRAY_HEAD = 5     # array items kept from the front
+_JSON_ARRAY_TAIL = 2     # array items kept from the back
+
+
+def _shrink_json(node: object, protected: bool) -> object:
+    """Structure-preserving shrink: keys and error subtrees stay intact."""
+    if isinstance(node, dict):
+        return {
+            k: _shrink_json(
+                v, protected or bool(_ERRORISH_KEY_RE.search(str(k))))
+            for k, v in node.items()
+        }
+    if isinstance(node, list):
+        limit = _JSON_ARRAY_HEAD + _JSON_ARRAY_TAIL
+        if not protected and len(node) > limit + 1:
+            elided = len(node) - limit
+            return (
+                [_shrink_json(v, protected) for v in node[:_JSON_ARRAY_HEAD]]
+                + [f"[coderag: {elided} of {len(node)} items elided]"]
+                + [_shrink_json(v, protected) for v in node[-_JSON_ARRAY_TAIL:]]
+            )
+        return [_shrink_json(v, protected) for v in node]
+    if isinstance(node, str) and not protected and len(node) > _JSON_MAX_STRING:
+        return (node[:_JSON_MAX_STRING]
+                + f"…[coderag: {len(node) - _JSON_MAX_STRING} chars elided]")
+    return node
+
+
+def compress_json_text(
+    text: str, threshold: int, directory: Path | None = None
+) -> str | None:
+    """Shrink an oversized JSON tool result, keeping structure and errors.
+
+    Object keys always survive; subtrees under error-ish keys are never
+    shrunk; long arrays keep their edges; long strings are truncated. The
+    raw original stays recoverable. Returns None when the text isn't JSON.
+    """
+    stripped = text.strip()
+    if not stripped or stripped[0] not in "{[":
+        return None
+    try:
+        data = json.loads(stripped)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(data, (dict, list)) or len(text) <= threshold:
+        return None
+    key = store_original(text, directory)
+    shrunk = json.dumps(_shrink_json(data, protected=False),
+                        ensure_ascii=False, separators=(",", ":"))
+    return (shrunk + f'\n[coderag: JSON compressed; full original via '
+            f'coderag_expand("{key}")]')
+
+
 def compress_text(
     text: str, threshold: int, keep: int, directory: Path | None = None
 ) -> str:
     if _DIFF_RE.search(text):
         # Diffs are dense signal: every changed line matters. Only strip ANSI.
         return strip_ansi(text)
+    as_json = compress_json_text(text, threshold, directory)
+    if as_json is not None:
+        return as_json
     cleaned = squeeze_blank_lines(dedupe_consecutive_lines(strip_ansi(text)))
     cleaned = elide_base64_runs(cleaned, directory)
     return elide_middle(cleaned, threshold, keep, directory, original=text)
+
+
+def tool_schema_chars_in_body(raw: bytes) -> int:
+    """Characters of tool-definition JSON in a request body (count only)."""
+    try:
+        data = json.loads(raw)
+        tools = data.get("tools")
+        if not isinstance(tools, list) or not tools:
+            return 0
+        return len(json.dumps(tools, ensure_ascii=False))
+    except Exception:  # noqa: BLE001 - observability only
+        return 0
 
 
 # ---- request-body rewriting -------------------------------------------------

@@ -259,6 +259,8 @@ class LLMRequest(Base):
     # only — content itself is never stored). Feeds the --compress diagnostic.
     tool_result_chars: Mapped[int] = mapped_column(Integer, default=0)
     token_lean_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    requested_model: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    tool_schema_chars: Mapped[int] = mapped_column(Integer, default=0)
     latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
     success: Mapped[bool] = mapped_column(Boolean, default=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

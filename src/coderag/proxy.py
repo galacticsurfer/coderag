@@ -53,7 +53,9 @@ class ObservedUsage:
     cached_input_tokens: int | None = None
     cache_creation_input_tokens: int | None = None
     tool_result_chars: int = 0
+    tool_schema_chars: int = 0
     token_lean_active: bool = False
+    requested_model: str | None = None
     status_code: int = 0
     streamed: bool = False
 
@@ -73,7 +75,9 @@ def _record(usage: ObservedUsage, latency_ms: float) -> None:
                 cached_input_tokens=usage.cached_input_tokens,
                 cache_creation_input_tokens=usage.cache_creation_input_tokens,
                 tool_result_chars=usage.tool_result_chars,
+                tool_schema_chars=usage.tool_schema_chars,
                 token_lean_active=usage.token_lean_active,
+                requested_model=usage.requested_model,
                 latency_ms=latency_ms,
                 success=200 <= usage.status_code < 300,
                 error=None if 200 <= usage.status_code < 300
@@ -137,6 +141,7 @@ def create_app(
     cap_output: int | None = None,
     cap_thinking: int | None = None,
     auto_cache: bool = False,
+    routes: dict[str, str] | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:  # pragma: no cover
@@ -152,6 +157,8 @@ def create_app(
     app.state.cap_totals = {"requests_capped": 0}
     app.state.auto_cache = auto_cache
     app.state.auto_cache_totals = {"requests_cached": 0}
+    app.state.routes = dict(routes or {})
+    app.state.route_totals = {"requests_routed": 0}
     app.state.compression_totals = {
         "requests_seen": 0, "requests_compressed": 0, "chars_in": 0, "chars_saved": 0,
     }
@@ -171,6 +178,8 @@ def create_app(
             "caps": dict(app.state.cap_totals),
             "auto_cache": app.state.auto_cache,
             "auto_cache_totals": dict(app.state.auto_cache_totals),
+            "routes": dict(app.state.routes),
+            "route_totals": dict(app.state.route_totals),
         }
 
     @app.api_route(
@@ -190,6 +199,23 @@ def create_app(
 
         url_path = f"/{path}"
         is_messages_endpoint = url_path.rstrip("/").endswith("/messages")
+        usage = ObservedUsage()
+
+        # Opt-in model routing: rewrite exact user-named model IDs. The
+        # bluntest quality trade-off of all — explicit pairs only, off by
+        # default, and the doctor measures what it actually saved.
+        if (
+            request.app.state.routes
+            and request.method == "POST"
+            and is_messages_endpoint
+        ):
+            from coderag.model_routing import apply_model_route
+
+            routed = apply_model_route(body, request.app.state.routes)
+            if routed is not None:
+                body, requested, _target = routed
+                usage.requested_model = requested
+                request.app.state.route_totals["requests_routed"] += 1
 
         # Opt-in output caps: clamp max_tokens / thinking budget downward.
         # A deliberate quality trade-off — off by default, guarded like
@@ -257,11 +283,14 @@ def create_app(
                 request.app.state.auto_cache_totals["requests_cached"] += 1
 
         started = time.perf_counter()
-        usage = ObservedUsage()
         if request.method == "POST" and is_messages_endpoint:
-            from coderag.compression import tool_result_chars_in_body
+            from coderag.compression import (
+                tool_result_chars_in_body,
+                tool_schema_chars_in_body,
+            )
 
             usage.tool_result_chars = tool_result_chars_in_body(original_body)
+            usage.tool_schema_chars = tool_schema_chars_in_body(original_body)
             usage.token_lean_active = _TOKEN_LEAN_MARKER in original_body
 
         http: httpx.AsyncClient = request.app.state.client

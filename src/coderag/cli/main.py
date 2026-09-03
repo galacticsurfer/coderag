@@ -207,6 +207,11 @@ def proxy(
         help="Inject standard cache_control breakpoints (tools/system/last "
              "message) into requests that have none. Never touches clients "
              "that already cache. Big win for raw SDK traffic."),
+    route: list[str] = typer.Option(
+        [], "--route",
+        help="QUALITY TRADE-OFF: rewrite an exact model ID, e.g. "
+             "--route claude-opus-4-8=claude-sonnet-5 (repeatable). The "
+             "doctor then reports measured routing savings."),
 ) -> None:
     """Run the observability proxy: forwards LLM traffic unmodified, records real
     provider-billed token usage to the dashboard.
@@ -215,7 +220,20 @@ def proxy(
     """
     import uvicorn
 
+    from coderag.model_routing import parse_routes
     from coderag.proxy import create_app
+
+    try:
+        routes = parse_routes(route)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(2) from exc
+    if routes:
+        pairs = ", ".join(f"{k} -> {v}" for k, v in routes.items())
+        console.print(
+            f"[bold yellow]MODEL ROUTING ON[/] ({pairs}) — a cheaper model can "
+            "change answer quality more than any compressor. Watch quality, and "
+            "check `coderag doctor` for the measured saving.\n")
 
     mode = "observe + compress tool results" if compress else "observe only (byte-fidelity)"
     if auto_cache:
@@ -239,7 +257,7 @@ def proxy(
     )
     uvicorn.run(create_app(upstream, compress=compress,
                            cap_output=cap_output, cap_thinking=cap_thinking,
-                           auto_cache=auto_cache),
+                           auto_cache=auto_cache, routes=routes),
                 host=host, port=port, log_level="warning")
 
 
@@ -299,6 +317,26 @@ def doctor() -> None:
             f"{e.inactive_requests} without; need {MIN_SKILL_GROUP} each).[/]\n")
     else:
         console.print()
+
+    if len(report.models) > 1 or (report.models
+                                  and report.models[0].model != "unknown"):
+        mt = Table(title="Spend by model (published per-model prices)")
+        mt.add_column("model")
+        mt.add_column("requests", justify="right")
+        mt.add_column("output tok", justify="right")
+        mt.add_column("est $", justify="right")
+        for m in report.models:
+            mt.add_row(m.model, f"{m.requests:,}", f"{m.output_tokens:,}",
+                       f"{m.est_usd:.4f}")
+        console.print(mt)
+
+    rt = report.routing
+    if rt is not None and rt.routed_requests:
+        extra = (f" ({rt.unpriced_requests} routed requests unpriced)"
+                 if rt.unpriced_requests else "")
+        console.print(
+            f"routing savings (measured): [green]${rt.saved_usd:.4f}[/] across "
+            f"{rt.routed_requests} routed requests{extra}\n")
 
     if not report.diagnoses:
         console.print("[green]No obvious waste found in the observed window.[/] "
