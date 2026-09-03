@@ -1,3 +1,8 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/galacticsurfer/coderag/main/assets/logo.svg"
+       width="96" alt="CodeRAG logo — the one token you need, between the brackets">
+</p>
+
 # CodeRAG
 
 **Token-efficient, structure-aware Code Intelligence + RAG for private source repositories.**
@@ -426,6 +431,12 @@ estimate — because the honest answer is sometimes "this lever wouldn't help *y
 report is on the dashboard (`/dashboard`) and as JSON at `GET /doctor`. All dollar figures are
 estimates at the configured prices (`CODERAG_PRICE_INPUT_PER_MTOK` /
 `CODERAG_PRICE_OUTPUT_PER_MTOK`), computed from observed traffic — not billing data.
+
+Every lever's **measured** effect lands in one place — the dashboard's doctor card (and
+`coderag doctor` / `GET /doctor`): retrieval savings, `--compress` tokens/$ saved (persisted
+per request, survives proxy restarts), `--route` savings at published price differences, the
+`/token-lean` skill's output effect, and the output caps' effect (capped vs uncapped
+requests, observational).
 
 ### The output side, measured and (optionally) capped
 

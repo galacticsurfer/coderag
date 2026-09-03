@@ -9,9 +9,10 @@ metrics. Every repository-scoped request is authorized via
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -69,6 +70,14 @@ def _resolve_authorized(session: Session, name: str | None, who: str | None) -> 
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+_LOGO_SVG = (Path(__file__).parent / "logo.svg").read_text()
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    return Response(content=_LOGO_SVG, media_type="image/svg+xml")
 
 
 @app.post("/repositories", response_model=s.RepositoryOut)
@@ -376,6 +385,20 @@ def doctor_endpoint(session: Session = Depends(get_session)) -> dict:
             None if report.skill_effect is None else {
                 **asdict(report.skill_effect),
                 "measured_reduction": report.skill_effect.measured_reduction,
+            }
+        ),
+        "cap_effect": (
+            None if report.cap_effect is None else {
+                **asdict(report.cap_effect),
+                "measured_reduction": report.cap_effect.measured_reduction,
+            }
+        ),
+        "compression": (
+            None if report.compression is None else {
+                **asdict(report.compression),
+                "est_tokens_saved": report.compression.est_tokens_saved,
+                "est_usd_saved": report.compression.est_usd_saved(
+                    settings.price_input_per_mtok),
             }
         ),
         "models": [asdict(m) for m in report.models],

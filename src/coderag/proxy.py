@@ -56,6 +56,9 @@ class ObservedUsage:
     tool_schema_chars: int = 0
     token_lean_active: bool = False
     requested_model: str | None = None
+    compression_chars_saved: int = 0
+    cap_applied: bool = False
+    auto_cache_applied: bool = False
     status_code: int = 0
     streamed: bool = False
 
@@ -78,6 +81,9 @@ def _record(usage: ObservedUsage, latency_ms: float) -> None:
                 tool_schema_chars=usage.tool_schema_chars,
                 token_lean_active=usage.token_lean_active,
                 requested_model=usage.requested_model,
+                compression_chars_saved=usage.compression_chars_saved,
+                cap_applied=usage.cap_applied,
+                auto_cache_applied=usage.auto_cache_applied,
                 latency_ms=latency_ms,
                 success=200 <= usage.status_code < 300,
                 error=None if 200 <= usage.status_code < 300
@@ -235,6 +241,7 @@ def create_app(
             )
             if capped is not None:
                 body = capped
+                usage.cap_applied = True
                 request.app.state.cap_totals["requests_capped"] += 1
 
         # Opt-in, guarded compression of tool_result blocks in the request body.
@@ -257,6 +264,7 @@ def create_app(
             )
             if result is not None:
                 body, stats = result
+                usage.compression_chars_saved = stats.chars_saved
                 totals["requests_compressed"] += 1
                 totals["chars_in"] += stats.chars_in
                 totals["chars_saved"] += stats.chars_saved
@@ -280,6 +288,7 @@ def create_app(
             cached_body = apply_auto_cache(body)
             if cached_body is not None:
                 body = cached_body
+                usage.auto_cache_applied = True
                 request.app.state.auto_cache_totals["requests_cached"] += 1
 
         started = time.perf_counter()

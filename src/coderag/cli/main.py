@@ -330,6 +330,23 @@ def doctor() -> None:
                        f"{m.est_usd:.4f}")
         console.print(mt)
 
+    ce = report.compression
+    if ce is not None and ce.requests_compressed:
+        console.print(
+            f"--compress (measured): saved ~{ce.est_tokens_saved:,} tokens "
+            f"(~${ce.est_usd_saved(settings.price_input_per_mtok):.4f}) across "
+            f"{ce.requests_compressed} compressed requests")
+
+    cap = report.cap_effect
+    if cap is not None and cap.measured_reduction is not None and cap.active_requests:
+        arrow = "less" if cap.measured_reduction >= 0 else "MORE"
+        console.print(
+            f"output caps (measured): {cap.avg_output_inactive:,.0f} -> "
+            f"{cap.avg_output_active:,.0f} avg output tokens/request "
+            f"({abs(100 * cap.measured_reduction):.0f}% {arrow}; "
+            f"{cap.active_requests} capped / {cap.inactive_requests} uncapped; "
+            "observational)")
+
     rt = report.routing
     if rt is not None and rt.routed_requests:
         extra = (f" ({rt.unpriced_requests} routed requests unpriced)"

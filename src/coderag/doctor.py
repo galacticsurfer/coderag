@@ -122,17 +122,50 @@ class SkillEffect:
 MIN_SKILL_GROUP = 5  # requests needed on each side before the comparison counts
 
 
-def skill_effect(rows: list[UsageRow]) -> SkillEffect:
-    active = [r.output_tokens or 0 for r in rows
-              if getattr(r, "token_lean_active", False)]
+def _output_by_flag(rows: list[UsageRow], attr: str) -> SkillEffect:
+    """Avg output tokens/request with a boolean lever on vs off (observational)."""
+    active = [r.output_tokens or 0 for r in rows if getattr(r, attr, False)]
     inactive = [r.output_tokens or 0 for r in rows
-                if not getattr(r, "token_lean_active", False)]
+                if not getattr(r, attr, False)]
     return SkillEffect(
         active_requests=len(active),
         inactive_requests=len(inactive),
         avg_output_active=sum(active) / len(active) if active else 0.0,
         avg_output_inactive=sum(inactive) / len(inactive) if inactive else 0.0,
     )
+
+
+def skill_effect(rows: list[UsageRow]) -> SkillEffect:
+    return _output_by_flag(rows, "token_lean_active")
+
+
+def cap_effect(rows: list[UsageRow]) -> SkillEffect:
+    return _output_by_flag(rows, "cap_applied")
+
+
+@dataclass
+class CompressionEffect:
+    """Measured --compress savings, persisted per request by the proxy."""
+
+    requests_compressed: int = 0
+    chars_saved: int = 0
+
+    @property
+    def est_tokens_saved(self) -> int:
+        return int(self.chars_saved / CHARS_PER_TOKEN)
+
+    def est_usd_saved(self, price_in: float) -> float:
+        return self.est_tokens_saved / 1e6 * price_in
+
+
+def compression_effect(rows: list[UsageRow]) -> CompressionEffect:
+    e = CompressionEffect()
+    for r in rows:
+        saved = getattr(r, "compression_chars_saved", 0) or 0
+        if saved > 0:
+            e.requests_compressed += 1
+            e.chars_saved += saved
+    return e
 
 
 @dataclass
@@ -201,6 +234,8 @@ class DoctorReport:
     breakdown: CostBreakdown
     diagnoses: list[Diagnosis] = field(default_factory=list)
     skill_effect: SkillEffect | None = None
+    cap_effect: SkillEffect | None = None
+    compression: CompressionEffect | None = None
     models: list[ModelSpend] = field(default_factory=list)
     routing: RoutingSavings | None = None
 
@@ -455,6 +490,8 @@ def examine(
             models=mix,
         ),
         skill_effect=effect,
+        cap_effect=cap_effect(rows) if rows else None,
+        compression=compression_effect(rows) if rows else None,
         models=mix,
         routing=routing_savings(rows) if rows else None,
     )

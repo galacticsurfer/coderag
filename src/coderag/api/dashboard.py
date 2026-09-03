@@ -15,6 +15,7 @@ DASHBOARD_HTML = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CodeRAG · Token Dashboard</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2064%2064%22%20role%3D%22img%22%20aria-label%3D%22CodeRAG%20logo%22%3E%20%20%3Cpath%20d%3D%22M23%2015%20L9%2032%20L23%2049%22%20stroke%3D%22%232a78d6%22%20stroke-width%3D%228%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20fill%3D%22none%22/%3E%20%20%3Cpath%20d%3D%22M41%2015%20L55%2032%20L41%2049%22%20stroke%3D%22%232a78d6%22%20stroke-width%3D%228%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20fill%3D%22none%22/%3E%20%20%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%227.5%22%20fill%3D%22%230ca30c%22/%3E%3C/svg%3E">
 <style>
   :root{
     color-scheme: light;
@@ -99,7 +100,7 @@ DASHBOARD_HTML = r"""<!doctype html>
 <div class="wrap">
   <header>
     <div>
-      <h1>CodeRAG<span class="dot">.</span> Token Dashboard</h1>
+      <h1><svg viewBox="0 0 64 64" width="22" height="22" style="vertical-align:-4px;margin-right:7px" aria-hidden="true"><path d="M23 15 L9 32 L23 49" stroke="#2a78d6" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M41 15 L55 32 L41 49" stroke="#2a78d6" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/><circle cx="32" cy="32" r="7.5" fill="#0ca30c"/></svg>CodeRAG<span class="dot">.</span> Token Dashboard</h1>
       <div class="sub">What was queried, and how much context was saved before hitting the LLM.</div>
     </div>
     <div class="controls">
@@ -242,6 +243,16 @@ function renderDoctor(d){
   if(d.models && d.models.length > 1){
     html += '<p class="hint">by model: ' + d.models.map(m =>
       `${esc(m.model)} ${usd(m.est_usd)} (${n(m.requests)} req)`).join(' · ') + '</p>';
+  }
+  const ce = d.compression;
+  if(ce && ce.requests_compressed){
+    html += `<p class="hint">--compress (measured): saved ${n(ce.est_tokens_saved)} tokens (~${usd(ce.est_usd_saved)}) across ${n(ce.requests_compressed)} compressed requests</p>`;
+  }
+  const cape = d.cap_effect;
+  if(cape && cape.measured_reduction != null && cape.active_requests){
+    const pct = Math.abs(100*cape.measured_reduction).toFixed(0);
+    const dir = cape.measured_reduction >= 0 ? 'less' : 'more';
+    html += `<p class="hint">output caps (measured): ${n(Math.round(cape.avg_output_inactive))} → ${n(Math.round(cape.avg_output_active))} avg output tokens/request (${pct}% ${dir}; ${n(cape.active_requests)} capped / ${n(cape.inactive_requests)} uncapped; observational)</p>`;
   }
   const rt = d.routing;
   if(rt && rt.routed_requests){
